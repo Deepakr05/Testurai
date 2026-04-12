@@ -86,7 +86,7 @@ export default function Generate() {
       })
       clearInterval(loadInterval.current)
       showToast('Success! Redirecting to test plan...', 'success')
-      setTimeout(() => navigate(`/plan/${r.data.data.id}`), 1000)
+      setTimeout(() => navigate(`/plan/${r.data.data.id}`, { state: { plan: r.data.data } }), 1000)
     } catch(e) {
       clearInterval(loadInterval.current)
       setGenError(e.response?.data?.error || 'Generation failed. Check your LLM API key in Settings.')

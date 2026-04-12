@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -19,8 +19,10 @@ function formatDate(iso) {
 export default function ViewPlan() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [plan, setPlan]   = useState(null)
-  const [loading, setLoading] = useState(true)
+  const location = useLocation()
+  
+  const [plan, setPlan]   = useState(location.state?.plan || null)
+  const [loading, setLoading] = useState(!location.state?.plan)
   const [error,   setError]   = useState('')
   const [section, setSection] = useState('full document')
   const [exporting, setExporting] = useState({ docx: false, pdf: false })
@@ -28,10 +30,11 @@ export default function ViewPlan() {
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
+    if (plan && plan.id === id) return; // Already have it from state
     axios.get(`/api/history/${id}`)
       .then(r => { setPlan(r.data.data); setLoading(false) })
       .catch(e => { setError(e.response?.data?.error || 'Not found'); setLoading(false) })
-  }, [id])
+  }, [id, plan])
 
   function showToast(msg, type = 'info') {
     setToast({ msg, type })
