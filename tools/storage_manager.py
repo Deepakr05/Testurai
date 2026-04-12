@@ -29,7 +29,11 @@ def get_supabase():
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_KEY")
     if url and key and Client:
-        return create_client(url, key)
+        try:
+            return create_client(url, key)
+        except Exception as e:
+            print(f"Supabase client init failed: {e}")
+            return None
     return None
 
 # ─── Default structures ───────────────────────────────────────────────────────
