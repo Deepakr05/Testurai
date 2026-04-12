@@ -507,7 +507,8 @@ def settings_get():
         data["_persistence"] = get_persistence_mode()
         return ok(data)
     except Exception as e:
-        return err(str(e), 500)
+        import traceback
+        return err(f"{e} - {traceback.format_exc()}", 500)
 
 
 @app.route("/api/settings/persistence-mode", methods=["GET"])
