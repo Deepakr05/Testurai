@@ -145,38 +145,108 @@ def load_settings() -> dict:
     return merged
 
 
-def save_settings(new_settings: dict) -> None:
-    """Persist settings to Supabase and attempt local save, merging safely to ignore masks."""
-    # 1. Fetch current settings to prepare for smart merge
-    current_settings = load_settings()
-    
-    # 2. Perform a smart merge (ignore any fields in new_settings that are masked with '•')
-    _smart_merge(current_settings, new_settings)
-    final_settings = current_settings
+def _load_stored_settings() -> dict:
+    """
+    Load only the persisted layer (Supabase DB or local JSON) WITHOUT env var overrides.
+    Used by save_settings so user-entered keys are not clobbered by env vars.
+    """
+    base = json.loads(json.dumps(DEFAULT_SETTINGS))  # deep copy
 
-    # 3. Log debug information (Length and first 3 chars only for safety)
+    # 1. Try Supabase
+    sb = get_supabase()
+    if sb:
+        try:
+            res = sb.table("settings").select("config").eq("id", "global").execute()
+            if res.data and res.data[0].get("config"):
+                _deep_merge(base, res.data[0]["config"])
+                return base
+        except Exception as e:
+            print(f"Supabase stored-settings load error: {e}")
+
+    # 2. Try local JSON
+    try:
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+                if stored:
+                    _deep_merge(base, stored)
+    except Exception as e:
+        print(f"Local stored-settings load error: {e}")
+
+    return base
+
+
+def save_settings(new_settings: dict) -> None:
+    """
+    Persist settings to Supabase and attempt local save.
+    Merges against the raw STORED layer only (not env var overrides),
+    so user-entered keys are never clobbered by Vercel environment variables.
+    """
+    # 1. Read only the stored (DB/local) layer — no env var overrides
+    stored = _load_stored_settings()
+
+    # 2. Smart merge: skip any masked (••) values coming from the UI
+    _smart_merge(stored, new_settings)
+    final_settings = stored
+
+    # 3. Strip internal _source keys before persisting
+    _strip_source_keys(final_settings)
+
+    # 4. Log debug info
     print("--- [DEBUG: STORAGE SAVE] ---")
     for p, cfg in final_settings.get("llm", {}).get("providers", {}).items():
         key = cfg.get("api_key", "")
         if key and not key.startswith("•"):
             print(f"[{p}] Key length: {len(key)} | Prefix: {key[:3]}...")
-    
-    # 4. Supabase (Primary for Cloud)
+
+    # 5. Supabase (Primary for Cloud)
     sb = get_supabase()
     if sb:
         try:
             sb.table("settings").upsert({"id": "global", "config": final_settings}).execute()
+            print("[save_settings] Saved to Supabase OK")
         except Exception as e:
             print(f"Supabase settings save error: {e}")
 
-    # 5. Local (Primary for Dev, fails gracefully on Vercel)
+    # 6. Local (Primary for Dev, fails gracefully on Vercel read-only FS)
     try:
-        # Check if directory exists before writing
         SETTINGS_FILE.parent.mkdir(exist_ok=True)
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(final_settings, f, indent=2)
+        print("[save_settings] Saved to local JSON OK")
     except Exception:
         pass
+
+
+def _strip_source_keys(d: dict) -> None:
+    """Recursively remove _source diagnostic keys before persisting."""
+    for k in list(d.keys()):
+        if k == "_source":
+            del d[k]
+        elif isinstance(d[k], dict):
+            _strip_source_keys(d[k])
+
+
+def get_persistence_mode() -> dict:
+    """
+    Returns what storage backend is active, so the UI can warn users
+    when no durable storage is available on Vercel.
+    """
+    sb = get_supabase()
+    if sb:
+        try:
+            sb.table("settings").select("id").limit(1).execute()
+            return {"mode": "supabase", "durable": True}
+        except Exception:
+            return {"mode": "supabase_error", "durable": False}
+
+    local_exists = SETTINGS_FILE.exists() if not os.getenv("VERCEL") else False
+    if local_exists:
+        return {"mode": "local", "durable": True}
+
+    # Running on Vercel without Supabase — ephemeral only
+    return {"mode": "ephemeral", "durable": False,
+            "warning": "No durable storage. Configure SUPABASE_URL + SUPABASE_KEY in Vercel env vars, or set API keys directly as Vercel environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc)."}
 
 
 def _smart_merge(base: dict, override: dict) -> None:

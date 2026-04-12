@@ -18,10 +18,19 @@ export default function Settings() {
   const [testing, setTesting]   = useState({})
   const [testResults, setTestResults] = useState({})
   const [toast, setToast]       = useState(null)
+  const [persistence, setPersistence] = useState(null)
 
   useEffect(() => {
     axios.get('/api/settings')
-      .then(r => { setSettings(r.data.data); setLoading(false) })
+      .then(r => {
+        const data = r.data.data
+        if (data._persistence) {
+          setPersistence(data._persistence)
+          delete data._persistence
+        }
+        setSettings(data)
+        setLoading(false)
+      })
       .catch(() => setLoading(false))
   }, [])
 
@@ -96,6 +105,44 @@ export default function Settings() {
           {saving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '💾'} Save Settings
         </button>
       </div>
+
+      {/* Persistence warning banner */}
+      {persistence && !persistence.durable && (
+        <div style={{
+          background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)',
+          borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: 20,
+          display: 'flex', gap: 12, alignItems: 'flex-start',
+        }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>⚠️</span>
+          <div>
+            <div style={{ fontWeight: 700, color: '#f59e0b', marginBottom: 4 }}>No Durable Storage Detected</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              {persistence.warning || 'Settings will be lost after each deploy.'}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+              <strong>Recommended fix:</strong> Add your API keys as Vercel Environment Variables:
+              <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4, margin: '0 4px' }}>OPENAI_API_KEY</code>,
+              <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4, margin: '0 4px' }}>ANTHROPIC_API_KEY</code>,
+              <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4, margin: '0 4px' }}>GEMINI_API_KEY</code>,
+              <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4, margin: '0 4px' }}>JIRA_API_TOKEN</code>,
+              <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4, margin: '0 4px' }}>JIRA_EMAIL</code>,
+              <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 4, margin: '0 4px' }}>JIRA_BASE_URL</code>.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Supabase connected badge */}
+      {persistence?.durable && persistence?.mode === 'supabase' && (
+        <div style={{
+          background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)',
+          borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 20,
+          display: 'flex', gap: 10, alignItems: 'center', fontSize: 13,
+        }}>
+          <span>✅</span>
+          <span style={{ color: 'var(--green)', fontWeight: 600 }}>Supabase connected — settings will persist across deployments.</span>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, alignItems: 'start' }}>
         {/* Left Tabs */}

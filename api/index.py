@@ -27,6 +27,7 @@ try:
     from tools.storage_manager import (
         load_settings, save_settings, get_settings_masked,
         load_history, get_test_plan, delete_test_plan, get_stats,
+        get_persistence_mode,
     )
     from tools.jira_client import fetch_issue, test_connection as jira_test_connection
     from tools.llm_client import test_connection as llm_test_connection
@@ -500,9 +501,20 @@ def settings_active_provider():
 
 @app.route("/api/settings", methods=["GET"])
 def settings_get():
-    """Return settings with masked API keys."""
+    """Return settings with masked API keys plus persistence mode."""
     try:
-        return ok(get_settings_masked())
+        data = get_settings_masked()
+        data["_persistence"] = get_persistence_mode()
+        return ok(data)
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/settings/persistence-mode", methods=["GET"])
+def settings_persistence():
+    """Return only the persistence mode — useful for the UI banner."""
+    try:
+        return ok(get_persistence_mode())
     except Exception as e:
         return err(str(e), 500)
 
