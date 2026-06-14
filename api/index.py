@@ -51,11 +51,39 @@ def _supabase_key() -> str:
     return os.getenv("SUPABASE_KEY", "")
 
 
+def _fetch_profile(user_id: str) -> dict | None:
+    """
+    Fetch a user profile via the get_user_profile() SECURITY DEFINER RPC.
+    This bypasses PostgREST's anon-role restrictions on auth-linked tables.
+    """
+    url = _supabase_url()
+    key = _supabase_key()
+    if not url or not key:
+        return None
+    try:
+        payload = json.dumps({"p_user_id": user_id}).encode()
+        req = urllib.request.Request(
+            f"{url}/rest/v1/rpc/get_user_profile",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            rows = json.loads(resp.read().decode())
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[auth] Profile fetch error: {e}", file=sys.stderr)
+        return None
+
+
 def _verify_token(token: str):
     """
     Verify a Supabase JWT against the Auth REST API, then fetch the user's
-    role profile from PostgREST. Returns (user_dict, profile_dict) or
-    (None, None) on failure.
+    role profile via RPC. Returns (user_dict, profile_dict) or (None, None).
     """
     url = _supabase_url()
     key = _supabase_key()
@@ -73,17 +101,11 @@ def _verify_token(token: str):
         if not user_id:
             return None, None
 
-        # 2. Fetch role from user_profiles via PostgREST
-        req2 = urllib.request.Request(
-            f"{url}/rest/v1/user_profiles?id=eq.{user_id}&select=*",
-            headers={"Authorization": f"Bearer {token}", "apikey": key},
-        )
-        with urllib.request.urlopen(req2, timeout=8) as resp2:
-            profiles = json.loads(resp2.read().decode())
-
-        if not profiles:
+        # 2. Fetch role via SECURITY DEFINER RPC (bypasses anon PostgREST restrictions)
+        profile = _fetch_profile(user_id)
+        if not profile:
             return None, None
-        return user_data, profiles[0]
+        return user_data, profile
 
     except urllib.error.HTTPError as e:
         if e.code == 401:
@@ -238,17 +260,10 @@ def auth_login():
         if not access_token or not user_id:
             return err("Login failed", 401)
 
-        # Fetch role profile via PostgREST
-        req2 = urllib.request.Request(
-            f"{url}/rest/v1/user_profiles?id=eq.{user_id}&select=*",
-            headers={"Authorization": f"Bearer {access_token}", "apikey": key},
-        )
-        with urllib.request.urlopen(req2, timeout=8) as resp2:
-            profiles = json.loads(resp2.read().decode())
-
-        if not profiles:
+        # Fetch role via SECURITY DEFINER RPC (bypasses anon PostgREST restrictions)
+        profile = _fetch_profile(user_id)
+        if not profile:
             return err("User profile not found. Contact your admin.", 403)
-        profile = profiles[0]
 
         return ok({
             "access_token": access_token,
