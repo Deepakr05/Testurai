@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useContext } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { ProviderContext } from '../context/ProviderContext'
+import { AuthContext } from '../context/AuthContext'
 
 const FORMATS = ['unit', 'integration', 'e2e', 'security']
 
@@ -16,6 +17,8 @@ export default function Generate() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const { activeProvider } = useContext(ProviderContext)
+  const { hasRole } = useContext(AuthContext)
+  const readOnly = !hasRole('developer')
 
   const [jiraId, setJiraId] = useState(params.get('jira') || '')
   const [issue,  setIssue]  = useState(null)
@@ -172,6 +175,12 @@ export default function Generate() {
         </div>
       </div>
 
+      {readOnly && (
+        <div className="card" style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--orange-bg, rgba(251,146,60,0.1))', border: '1px solid var(--orange, #fb923c)', color: 'var(--orange, #fb923c)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>👁</span> Read-only mode — you can browse Jira issues but generating test plans requires a developer account.
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20, alignItems: 'start' }}>
 
         {/* Left: Jira Input + Preview */}
@@ -283,12 +292,12 @@ export default function Generate() {
         </div>
 
         {/* Right: Config Panel */}
-        <div className="card" style={{ position: 'sticky', top: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="card" style={{ position: 'sticky', top: 20, display: 'flex', flexDirection: 'column', gap: 14, opacity: readOnly ? 0.6 : 1 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Test Plan Configuration</div>
 
           <div className="form-group">
             <label className="form-label">Detail Level</label>
-            <select className="form-select" value={detailLevel} onChange={e => setDetailLevel(e.target.value)}>
+            <select className="form-select" value={detailLevel} onChange={e => setDetailLevel(e.target.value)} disabled={readOnly}>
               <option value="standard">Standard</option>
               <option value="detailed">Detailed</option>
             </select>
@@ -300,13 +309,14 @@ export default function Generate() {
               {FORMATS.map(f => (
                 <button
                   key={f}
-                  onClick={() => toggleFormat(f)}
+                  onClick={() => !readOnly && toggleFormat(f)}
+                  disabled={readOnly}
                   style={{
                     padding: '4px 12px',
                     borderRadius: 9999,
                     fontSize: 12,
                     fontWeight: 600,
-                    cursor: 'pointer',
+                    cursor: readOnly ? 'not-allowed' : 'pointer',
                     transition: 'all 0.2s',
                     border: `1px solid ${formats.includes(f) ? 'var(--cyan)' : 'var(--border-2)'}`,
                     background: formats.includes(f) ? 'var(--cyan-dim)' : 'transparent',
@@ -328,7 +338,7 @@ export default function Generate() {
               <div className="toggle-desc">Edge & boundary tests</div>
             </div>
             <label className="toggle">
-              <input type="checkbox" checked={negCases} onChange={e => setNegCases(e.target.checked)} />
+              <input type="checkbox" checked={negCases} onChange={e => setNegCases(e.target.checked)} disabled={readOnly} />
               <span className="toggle-slider" />
             </label>
           </div>
@@ -339,7 +349,7 @@ export default function Generate() {
               <div className="toggle-desc">Sub-task context in prompt</div>
             </div>
             <label className="toggle">
-              <input type="checkbox" checked={subTasks} onChange={e => setSubTasks(e.target.checked)} />
+              <input type="checkbox" checked={subTasks} onChange={e => setSubTasks(e.target.checked)} disabled={readOnly} />
               <span className="toggle-slider" />
             </label>
           </div>
@@ -350,21 +360,27 @@ export default function Generate() {
               <div className="toggle-desc">Enhanced detail mode</div>
             </div>
             <label className="toggle">
-              <input type="checkbox" checked={aiSuggestions} onChange={e => setAiSuggestions(e.target.checked)} />
+              <input type="checkbox" checked={aiSuggestions} onChange={e => setAiSuggestions(e.target.checked)} disabled={readOnly} />
               <span className="toggle-slider" />
             </label>
           </div>
-          
+
           <div className="divider" style={{ margin: '8px 0' }} />
-          
+
           <button
             className="btn btn-primary btn-lg"
             onClick={handleGenerate}
-            disabled={!issue || generating}
+            disabled={!issue || generating || readOnly}
+            title={readOnly ? 'Developer account required to generate test plans' : ''}
             style={{ width: '100%', padding: '12px 16px', fontSize: 14 }}
           >
             {generating ? <><span className="spinner" style={{ borderWidth: 2, width: 16, height: 16 }} /> Generating...</> : '⚡ Generate Test Plan'}
           </button>
+          {readOnly && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+              Developer account required to generate
+            </div>
+          )}
         </div>
       </div>
       

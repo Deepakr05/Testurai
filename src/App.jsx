@@ -32,10 +32,10 @@ function AppLayout() {
           <Routes>
             <Route path="/"               element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard"      element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/generate"       element={<ProtectedRoute minRole="developer"><Generate /></ProtectedRoute>} />
+            <Route path="/generate"       element={<ProtectedRoute><Generate /></ProtectedRoute>} />
             <Route path="/history"        element={<ProtectedRoute><History /></ProtectedRoute>} />
             <Route path="/test-cases"     element={<ProtectedRoute><TestCaseDashboard /></ProtectedRoute>} />
-            <Route path="/test-generator" element={<ProtectedRoute minRole="developer"><TestGenerator /></ProtectedRoute>} />
+            <Route path="/test-generator" element={<ProtectedRoute><TestGenerator /></ProtectedRoute>} />
             <Route path="/plan/:id"       element={<ProtectedRoute><ViewPlan /></ProtectedRoute>} />
             <Route path="/settings"       element={<ProtectedRoute minRole="developer"><Settings /></ProtectedRoute>} />
             <Route path="/users"          element={<ProtectedRoute minRole="admin"><UserManagement /></ProtectedRoute>} />

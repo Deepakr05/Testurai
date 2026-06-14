@@ -2,12 +2,15 @@ import { useState, useEffect, useMemo, useContext } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { ProviderContext } from '../context/ProviderContext'
+import { AuthContext } from '../context/AuthContext'
 
 export default function TestGenerator() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const paramTc = searchParams.get('tc') || ''
   const { activeProvider } = useContext(ProviderContext)
+  const { hasRole } = useContext(AuthContext)
+  const readOnly = !hasRole('developer')
 
   const [testCases, setTestCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -236,18 +239,18 @@ export default function TestGenerator() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Playwright Test Generator</h1>
-          <p className="page-subtitle">Generate, manage, and export automated e2e tests</p>
+          <p className="page-subtitle">{readOnly ? 'View and export automated e2e tests' : 'Generate, manage, and export automated e2e tests'}</p>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <button 
-            className="btn btn-outline" 
+          <button
+            className="btn btn-outline"
             onClick={handleCopySelected}
             disabled={selectedIds.size === 0}
           >
             📋 Copy Selected
           </button>
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             onClick={handleExportSelected}
             disabled={selectedIds.size === 0}
           >
@@ -255,6 +258,12 @@ export default function TestGenerator() {
           </button>
         </div>
       </div>
+
+      {readOnly && (
+        <div className="card" style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--orange-bg, rgba(251,146,60,0.1))', border: '1px solid var(--orange, #fb923c)', color: 'var(--orange, #fb923c)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>👁</span> Read-only mode — you can view and export scripts but generating or editing requires a developer account.
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 200px', gap: 16 }}>
@@ -315,9 +324,11 @@ export default function TestGenerator() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={handleBatchGenerate} disabled={selectedIds.size === 0 || batchGenStatus !== null}>
-             {batchGenStatus !== null ? `⏳ Generating ${batchGenStatus}...` : '🤖 Generate Scripts'}
-          </button>
+          {!readOnly && (
+            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={handleBatchGenerate} disabled={selectedIds.size === 0 || batchGenStatus !== null}>
+              {batchGenStatus !== null ? `⏳ Generating ${batchGenStatus}...` : '🤖 Generate Scripts'}
+            </button>
+          )}
           <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={toggleAllExpanded} disabled={selectedIds.size === 0}>
              👁️ {(() => {
                const selectedWithScripts = testCases.filter(tc => selectedIds.has(`${tc.plan_id}-${tc.id}`) && tc.playwright_script);
@@ -395,26 +406,28 @@ export default function TestGenerator() {
                       {tc.playwright_script && <span className="badge badge-blue">Ready</span>}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button 
-                        className="btn btn-primary" 
-                        style={{ fontSize: 11, padding: '4px 10px' }}
-                        onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
-                        disabled={generateLoading === tc.id || actionLoading}
-                      >
-                        {generateLoading === tc.id ? '⏳ Generating...' : (tc.playwright_script ? '🔄 Regenerate' : '🤖 Generate')}
-                      </button>
+                      {!readOnly && (
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: 11, padding: '4px 10px' }}
+                          onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
+                          disabled={generateLoading === tc.id || actionLoading}
+                        >
+                          {generateLoading === tc.id ? '⏳ Generating...' : (tc.playwright_script ? '🔄 Regenerate' : '🤖 Generate')}
+                        </button>
+                      )}
                       {tc.playwright_script && (
-                        <button 
-                          className="btn btn-ghost" 
+                        <button
+                          className="btn btn-ghost"
                           style={{ fontSize: 11, padding: '4px 8px' }}
                           onClick={toggleExpanded}
                         >
                           👁️ {isExpanded ? 'Hide Script' : 'View Script'}
                         </button>
                       )}
-                      {tc.playwright_script && !isEditing && (
-                        <button 
-                          className="btn btn-ghost" 
+                      {!readOnly && tc.playwright_script && !isEditing && (
+                        <button
+                          className="btn btn-ghost"
                           style={{ fontSize: 11, padding: '4px 8px' }}
                           onClick={() => startEdit(tc)}
                           disabled={actionLoading}
@@ -422,9 +435,9 @@ export default function TestGenerator() {
                           ✏️ Edit
                         </button>
                       )}
-                      {tc.playwright_script && (
-                        <button 
-                          className="btn btn-ghost" 
+                      {!readOnly && tc.playwright_script && (
+                        <button
+                          className="btn btn-ghost"
                           style={{ fontSize: 11, padding: '4px 8px', color: 'var(--red)' }}
                           onClick={() => handleDeleteScript(tc)}
                           disabled={actionLoading}

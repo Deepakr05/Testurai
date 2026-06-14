@@ -6,9 +6,9 @@ import { AuthContext } from '../context/AuthContext'
 
 const NAV = [
   { path: '/dashboard',     label: 'Dashboard',    icon: '▤' },
-  { path: '/generate',      label: 'Test Plan',    icon: '⚡',  minRole: 'developer' },
+  { path: '/generate',      label: 'Test Plan',    icon: '⚡' },
   { path: '/test-cases',    label: 'Test Cases',   icon: '📋' },
-  { path: '/test-generator',label: 'Test Scripts', icon: '🤖', minRole: 'developer' },
+  { path: '/test-generator',label: 'Test Scripts', icon: '🤖' },
   { path: '/history',       label: 'History',      icon: '🕐' },
   { path: '/settings',      label: 'Settings',     icon: '⚙',  minRole: 'developer' },
   { path: '/users',         label: 'Users',        icon: '👥', minRole: 'admin' },
