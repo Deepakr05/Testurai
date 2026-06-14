@@ -1,3 +1,5 @@
+import os
+import re
 import sys
 import json
 import traceback
@@ -5,7 +7,39 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# CORS allowlist. Defaults cover local dev + the production Vercel host;
+# override via FRONTEND_ORIGIN (comma-separated) on deployment.
+_DEFAULT_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://test-master.vercel.app",
+]
+_env_origins = os.getenv("FRONTEND_ORIGIN", "").strip()
+_allowed_origins = (
+    [o.strip() for o in _env_origins.split(",") if o.strip()]
+    if _env_origins
+    else _DEFAULT_ORIGINS
+)
+CORS(app, resources={r"/api/*": {"origins": _allowed_origins}})
+
+# Path-parameter validators. Reject obviously malformed input at the edge so
+# downstream code (Jira API, file paths, DB lookups) can trust its inputs.
+_JIRA_ID_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$")
+_PLAN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_TC_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _valid_jira_id(value: str) -> bool:
+    return bool(value) and bool(_JIRA_ID_RE.match(value.strip().upper()))
+
+
+def _valid_plan_id(value: str) -> bool:
+    return bool(value) and bool(_PLAN_ID_RE.match(value))
+
+
+def _valid_tc_id(value: str) -> bool:
+    return bool(value) and bool(_TC_ID_RE.match(value))
 
 # -- THE SAFETY NET --
 BOOTSTRAP_ERROR = None
@@ -74,6 +108,8 @@ def stats():
 @app.route("/api/jira/issue/<string:issue_id>", methods=["GET"])
 def jira_issue(issue_id: str):
     """Fetch and return a Jira issue preview."""
+    if not _valid_jira_id(issue_id):
+        return err("Invalid Jira issue id. Expected format like ABC-123.")
     try:
         settings = load_settings()
         issue = fetch_issue(issue_id.upper(), settings)
@@ -95,9 +131,13 @@ def generate():
     """
     try:
         body = request.get_json(force=True) or {}
-        if not body.get("jira_issue_id"):
+        jira_issue_id = (body.get("jira_issue_id") or "").strip()
+        if not jira_issue_id:
             return err("jira_issue_id is required")
+        if not _valid_jira_id(jira_issue_id):
+            return err("Invalid Jira issue id. Expected format like ABC-123.")
 
+        body["jira_issue_id"] = jira_issue_id.upper()
         record = generate_test_plan(body)
         return ok(record)
     except ValueError as e:
@@ -192,6 +232,8 @@ def all_test_cases():
 
 @app.route("/api/test-cases/<string:plan_id>", methods=["POST"])
 def tc_create(plan_id: str):
+    if not _valid_plan_id(plan_id):
+        return err("Invalid plan id.")
     try:
         from tools.storage_manager import save_test_plan
         record = get_test_plan(plan_id)
@@ -206,8 +248,9 @@ def tc_create(plan_id: str):
                 try:
                     num = int(tc["id"].replace("TC-", ""))
                     max_num = max(max_num, num)
-                except:
-                    pass
+                except (ValueError, TypeError):
+                    # Malformed TC id (non-numeric suffix); skip it.
+                    continue
         
         new_id = f"TC-{max_num + 1:03d}"
         new_tc = {
@@ -230,6 +273,8 @@ def tc_create(plan_id: str):
 
 @app.route("/api/test-cases/<string:plan_id>/<string:tc_id>", methods=["PUT"])
 def tc_update(plan_id: str, tc_id: str):
+    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
+        return err("Invalid plan or test case id.")
     try:
         from tools.storage_manager import save_test_plan
         record = get_test_plan(plan_id)
@@ -252,6 +297,8 @@ def tc_update(plan_id: str, tc_id: str):
 
 @app.route("/api/test-cases/<string:plan_id>/<string:tc_id>", methods=["DELETE"])
 def tc_delete(plan_id: str, tc_id: str):
+    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
+        return err("Invalid plan or test case id.")
     try:
         from tools.storage_manager import save_test_plan
         record = get_test_plan(plan_id)
@@ -274,6 +321,8 @@ def tc_delete(plan_id: str, tc_id: str):
 
 @app.route("/api/generate-script/<string:plan_id>/<string:tc_id>", methods=["POST"])
 def generate_script(plan_id: str, tc_id: str):
+    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
+        return err("Invalid plan or test case id.")
     try:
         from tools.storage_manager import load_settings, save_test_plan
         from tools.llm_client import generate
@@ -323,6 +372,8 @@ Return valid TypeScript code starting with import {{ test, expect }} from '@play
 @app.route("/api/history/<string:plan_id>", methods=["GET"])
 def history_detail(plan_id: str):
     """Get full test plan record including markdown content."""
+    if not _valid_plan_id(plan_id):
+        return err("Invalid plan id.")
     try:
         record = get_test_plan(plan_id)
         if not record:
@@ -335,6 +386,8 @@ def history_detail(plan_id: str):
 @app.route("/api/history/<string:plan_id>", methods=["DELETE"])
 def history_delete(plan_id: str):
     """Delete a test plan by ID."""
+    if not _valid_plan_id(plan_id):
+        return err("Invalid plan id.")
     try:
         deleted = delete_test_plan(plan_id)
         if not deleted:
@@ -347,6 +400,8 @@ def history_delete(plan_id: str):
 @app.route("/api/history/<string:plan_id>/star", methods=["PATCH"])
 def history_star(plan_id: str):
     """Toggle starred status on a test plan."""
+    if not _valid_plan_id(plan_id):
+        return err("Invalid plan id.")
     try:
         from tools.storage_manager import load_history, save_test_plan
         record = get_test_plan(plan_id)
@@ -414,6 +469,8 @@ def export(plan_id: str, fmt: str):
     """Export test plan as docx or pdf. Streams the file."""
     if fmt not in ("docx", "pdf"):
         return err("Format must be 'docx' or 'pdf'")
+    if not _valid_plan_id(plan_id):
+        return err("Invalid plan id.")
     try:
         record = get_test_plan(plan_id)
         if not record:

@@ -5,6 +5,9 @@ SOP: architecture/storage_sop.md
 """
 import json
 import os
+import sys
+import tempfile
+import traceback
 from datetime import datetime
 from pathlib import Path
 try:
@@ -22,8 +25,59 @@ EXPORTS_DIR = DATA_DIR / "exports"
 try:
     DATA_DIR.mkdir(exist_ok=True)
     EXPORTS_DIR.mkdir(exist_ok=True)
-except OSError:
-    pass
+except OSError as e:
+    # Read-only FS on Vercel is expected; log so non-Vercel failures are visible.
+    print(f"[storage] data dir not writable (expected on Vercel): {e}", file=sys.stderr)
+
+
+def _is_vercel() -> bool:
+    return bool(os.getenv("VERCEL"))
+
+
+def _atomic_write_json(path: Path, data) -> bool:
+    """
+    Write JSON atomically: write to a temp file in the same directory, fsync, then os.replace.
+    Returns True on success, False on failure. Errors are logged to stderr.
+    """
+    try:
+        path.parent.mkdir(exist_ok=True)
+    except OSError as e:
+        print(f"[storage] cannot create {path.parent}: {e}", file=sys.stderr)
+        return False
+
+    tmp_fd = None
+    tmp_path = None
+    try:
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+        )
+        tmp_path = Path(tmp_name)
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            tmp_fd = None  # ownership handed to file object
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                # Some filesystems (e.g. tmpfs in serverless) don't support fsync.
+                pass
+        os.replace(tmp_path, path)
+        return True
+    except OSError as e:
+        print(f"[storage] atomic write to {path} failed: {e}", file=sys.stderr)
+        return False
+    finally:
+        if tmp_fd is not None:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
 
 def get_supabase():
     url = os.getenv("SUPABASE_URL")
@@ -32,7 +86,13 @@ def get_supabase():
         try:
             return create_client(url, key)
         except Exception as e:
-            print(f"Supabase client init failed: {e}")
+            # Loud: misconfigured Supabase silently falling back to ephemeral
+            # storage on Vercel is exactly the failure mode we want to surface.
+            print(
+                f"[storage] Supabase client init failed: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
             return None
     return None
 
@@ -109,7 +169,13 @@ def load_settings() -> dict:
                 if db_config.get("jira", {}).get("api_token"):
                     merged["jira"]["_source"] = "SUPABASE_DB"
         except Exception as e:
-            print(f"Supabase settings load error: {e}")
+            # Supabase is configured but failing — loud so deploys don't
+            # silently degrade to ephemeral storage.
+            print(
+                f"[storage] Supabase settings load error: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
 
     # 2. Try Local (Fallback/Dev)
     try:
@@ -119,9 +185,9 @@ def load_settings() -> dict:
                 if stored:
                     _deep_merge(merged, stored)
                     # Note: we don't distinguish from DB for now as Vercel uses DB
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         # Expected on some cloud environments where Path.exists() is unreliable but file is missing
-        print(f"Local settings load bypassed: {e}")
+        print(f"[storage] local settings load bypassed: {e}", file=sys.stderr)
 
     # 3. Vercel env overrides (Highest Priority)
     def env_ovr(provider_key, env_key):
@@ -165,7 +231,11 @@ def _load_stored_settings() -> dict:
                 _deep_merge(base, res.data[0]["config"])
                 return base
         except Exception as e:
-            print(f"Supabase stored-settings load error: {e}")
+            print(
+                f"[storage] Supabase stored-settings load error: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
 
     # 2. Try local JSON
     try:
@@ -174,8 +244,8 @@ def _load_stored_settings() -> dict:
                 stored = json.load(f)
                 if stored:
                     _deep_merge(base, stored)
-    except Exception as e:
-        print(f"Local stored-settings load error: {e}")
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[storage] local stored-settings load error: {e}", file=sys.stderr)
 
     return base
 
@@ -205,21 +275,30 @@ def save_settings(new_settings: dict) -> None:
 
     # 5. Supabase (Primary for Cloud)
     sb = get_supabase()
+    supabase_ok = False
     if sb:
         try:
             sb.table("settings").upsert({"id": "global", "config": final_settings}).execute()
             print("[save_settings] Saved to Supabase OK")
+            supabase_ok = True
         except Exception as e:
-            print(f"Supabase settings save error: {e}")
+            print(
+                f"[storage] Supabase settings save error: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
 
     # 6. Local (Primary for Dev, fails gracefully on Vercel read-only FS)
-    try:
-        SETTINGS_FILE.parent.mkdir(exist_ok=True)
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(final_settings, f, indent=2)
+    local_ok = _atomic_write_json(SETTINGS_FILE, final_settings)
+    if local_ok:
         print("[save_settings] Saved to local JSON OK")
-    except Exception:
-        pass
+    elif not supabase_ok and not _is_vercel():
+        # Neither backend accepted the write and we're not on Vercel (where
+        # local-FS failure is expected) — this is a real problem.
+        print(
+            "[storage] WARNING: settings save failed for both Supabase and local JSON.",
+            file=sys.stderr,
+        )
 
 
 def _strip_source_keys(d: dict) -> None:
@@ -241,8 +320,16 @@ def get_persistence_mode() -> dict:
         try:
             sb.table("settings").select("id").limit(1).execute()
             return {"mode": "supabase", "durable": True}
-        except Exception:
-            return {"mode": "supabase_error", "durable": False}
+        except Exception as e:
+            print(
+                f"[storage] Supabase reachable check failed: {e}",
+                file=sys.stderr,
+            )
+            return {
+                "mode": "supabase_error",
+                "durable": False,
+                "error": str(e),
+            }
 
     local_exists = SETTINGS_FILE.exists() if not os.getenv("VERCEL") else False
     if local_exists:
@@ -315,25 +402,35 @@ def load_history() -> list:
             records = res.data or []
             return sorted(records, key=lambda r: r.get("generated_at", ""), reverse=True)
         except Exception as e:
-            print(f"Supabase read error: {e}")
-            
+            print(
+                f"[storage] Supabase history read error: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
+
     try:
         if HISTORY_FILE.exists():
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception as e:
-        print(f"Local history load error (ignored on Vercel): {e}")
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[storage] local history load error (ignored on Vercel): {e}", file=sys.stderr)
     return []
 
 
 def save_test_plan(record: dict) -> None:
     """Append a test plan record to Supabase and/or history.json."""
     sb = get_supabase()
+    supabase_ok = False
     if sb:
         try:
             sb.table("test_plans").upsert(record).execute()
+            supabase_ok = True
         except Exception as e:
-            print(f"Supabase upsert error: {e}")
+            print(
+                f"[storage] Supabase upsert error: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
 
     history = load_history()
     # Update if same ID exists, otherwise append
@@ -342,11 +439,13 @@ def save_test_plan(record: dict) -> None:
         history = [record if r["id"] == record["id"] else r for r in history]
     else:
         history.append(record)
-    try:
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+    local_ok = _atomic_write_json(HISTORY_FILE, history)
+    if not local_ok and not supabase_ok and not _is_vercel():
+        print(
+            f"[storage] WARNING: test plan {record.get('id')} not persisted "
+            "to any backend.",
+            file=sys.stderr,
+        )
 
 
 def get_test_plan(plan_id: str) -> dict | None:
@@ -365,17 +464,17 @@ def delete_test_plan(plan_id: str) -> bool:
         try:
             sb.table("test_plans").delete().eq("id", plan_id).execute()
         except Exception as e:
-            print(f"Supabase delete error: {e}")
+            print(
+                f"[storage] Supabase delete error: {e}\n"
+                f"{traceback.format_exc()}",
+                file=sys.stderr,
+            )
 
     history = load_history()
     new_history = [r for r in history if r["id"] != plan_id]
     if len(new_history) == len(history):
         return False
-    try:
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(new_history, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+    _atomic_write_json(HISTORY_FILE, new_history)
     return True
 
 
