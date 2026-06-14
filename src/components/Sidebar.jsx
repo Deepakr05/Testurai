@@ -28,7 +28,7 @@ export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { activeProvider, setActiveProvider } = useContext(ProviderContext)
-  const { user, logout, hasRole } = useContext(AuthContext)
+  const { user, hasRole } = useContext(AuthContext)
   const [providers, setProviders] = useState([])
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -81,11 +81,6 @@ export default function Sidebar() {
     } finally {
       setSwitching(false)
     }
-  }
-
-  function handleLogout() {
-    logout()
-    navigate('/login')
   }
 
   const activeMeta = PROVIDER_META[activeProvider] || {}
@@ -176,28 +171,6 @@ export default function Sidebar() {
       )}
 
       <div className="sidebar-footer">
-        {/* Logged-in user info */}
-        {user && (
-          <div style={{ padding: '0 16px 10px', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.full_name || user.email}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user.role}</span>
-              <button
-                onClick={handleLogout}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: 11, color: 'var(--text-muted)', padding: '2px 6px',
-                  borderRadius: 4,
-                }}
-                title="Sign out"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        )}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px' }}>
           <div className="sidebar-version">TestMaster v1.0</div>
           <button
