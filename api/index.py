@@ -51,19 +51,16 @@ def _supabase_key() -> str:
     return os.getenv("SUPABASE_KEY", "")
 
 
-def _fetch_profile(user_id: str) -> dict | None:
-    """
-    Fetch a user profile via the get_user_profile() SECURITY DEFINER RPC.
-    This bypasses PostgREST's anon-role restrictions on auth-linked tables.
-    """
+def _rpc(function_name: str, params: dict) -> list:
+    """Call a Supabase SECURITY DEFINER RPC via PostgREST. Returns list of rows."""
     url = _supabase_url()
     key = _supabase_key()
     if not url or not key:
-        return None
+        return []
     try:
-        payload = json.dumps({"p_user_id": user_id}).encode()
+        payload = json.dumps(params).encode()
         req = urllib.request.Request(
-            f"{url}/rest/v1/rpc/get_user_profile",
+            f"{url}/rest/v1/rpc/{function_name}",
             data=payload,
             headers={
                 "Content-Type": "application/json",
@@ -73,11 +70,15 @@ def _fetch_profile(user_id: str) -> dict | None:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
-            rows = json.loads(resp.read().decode())
-        return rows[0] if rows else None
+            return json.loads(resp.read().decode()) or []
     except Exception as e:
-        print(f"[auth] Profile fetch error: {e}", file=sys.stderr)
-        return None
+        print(f"[auth] RPC {function_name} error: {e}", file=sys.stderr)
+        return []
+
+
+def _fetch_profile(user_id: str) -> dict | None:
+    rows = _rpc("get_user_profile", {"p_user_id": user_id})
+    return rows[0] if rows else None
 
 
 def _verify_token(token: str):
@@ -304,11 +305,8 @@ def auth_me():
 @require_auth("admin")
 def users_list():
     try:
-        sb = get_supabase()
-        if not sb:
-            return err("Database not available", 503)
-        resp = sb.table("user_profiles").select("*").order("created_at").execute()
-        return ok(resp.data or [])
+        rows = _rpc("list_user_profiles", {})
+        return ok(rows)
     except Exception as e:
         return err(str(e), 500)
 
@@ -342,15 +340,13 @@ def users_create():
         return err("User creation failed: no ID returned", 500)
 
     try:
-        sb = get_supabase()
-        if sb:
-            # Trigger may already have created the row; upsert to set role
-            sb.table("user_profiles").upsert({
-                "id": new_user_id,
-                "email": email,
-                "full_name": full_name,
-                "role": role,
-            }).execute()
+        # Trigger may already have created the row; upsert to set role + full_name
+        _rpc("upsert_user_profile", {
+            "p_user_id": new_user_id,
+            "p_email": email,
+            "p_full_name": full_name,
+            "p_role": role,
+        })
     except Exception as e:
         print(f"[auth] Profile upsert after create failed: {e}", file=sys.stderr)
 
@@ -369,22 +365,19 @@ def users_update(user_id: str):
     if role and role not in ("normal", "developer", "admin"):
         return err("Invalid role.")
 
-    update = {}
+    params: dict = {"p_user_id": user_id}
     if role:
-        update["role"] = role
+        params["p_role"] = role
     if full_name is not None:
-        update["full_name"] = str(full_name).strip()
-    if not update:
+        params["p_full_name"] = str(full_name).strip()
+    if len(params) == 1:
         return err("Nothing to update")
 
     try:
-        sb = get_supabase()
-        if not sb:
-            return err("Database not available", 503)
-        resp = sb.table("user_profiles").update(update).eq("id", user_id).execute()
-        if not resp.data:
+        rows = _rpc("update_user_profile", params)
+        if not rows:
             return err("User not found", 404)
-        return ok(resp.data[0])
+        return ok(rows[0])
     except Exception as e:
         return err(str(e), 500)
 
