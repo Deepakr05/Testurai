@@ -313,31 +313,64 @@ def _strip_source_keys(d: dict) -> None:
 def get_persistence_mode() -> dict:
     """
     Returns what storage backend is active, so the UI can warn users
-    when no durable storage is available on Vercel.
+    when no durable storage is available on Vercel. Includes diagnostic
+    fields so the caller can distinguish between "env vars missing",
+    "client init failed", and "tables missing".
     """
+    url_set = bool(os.getenv("SUPABASE_URL"))
+    key_set = bool(os.getenv("SUPABASE_KEY"))
+    pkg_ok  = Client is not None
+
+    if not url_set or not key_set:
+        local_exists = SETTINGS_FILE.exists() if not _is_vercel() else False
+        if local_exists:
+            return {"mode": "local", "durable": True}
+        return {
+            "mode": "ephemeral",
+            "durable": False,
+            "diag": {
+                "supabase_url_set": url_set,
+                "supabase_key_set": key_set,
+                "supabase_pkg_ok": pkg_ok,
+            },
+            "warning": (
+                "No durable storage. Configure SUPABASE_URL + SUPABASE_KEY "
+                "in Vercel env vars, or set API keys directly as Vercel "
+                "environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc)."
+            ),
+        }
+
     sb = get_supabase()
-    if sb:
-        try:
-            sb.table("settings").select("id").limit(1).execute()
-            return {"mode": "supabase", "durable": True}
-        except Exception as e:
-            print(
-                f"[storage] Supabase reachable check failed: {e}",
-                file=sys.stderr,
-            )
-            return {
-                "mode": "supabase_error",
-                "durable": False,
-                "error": str(e),
-            }
+    if sb is None:
+        # Env vars are present but create_client() threw — key/URL is wrong.
+        return {
+            "mode": "supabase_init_failed",
+            "durable": False,
+            "diag": {
+                "supabase_url_set": url_set,
+                "supabase_key_set": key_set,
+                "supabase_pkg_ok": pkg_ok,
+            },
+        }
 
-    local_exists = SETTINGS_FILE.exists() if not os.getenv("VERCEL") else False
-    if local_exists:
-        return {"mode": "local", "durable": True}
-
-    # Running on Vercel without Supabase — ephemeral only
-    return {"mode": "ephemeral", "durable": False,
-            "warning": "No durable storage. Configure SUPABASE_URL + SUPABASE_KEY in Vercel env vars, or set API keys directly as Vercel environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc)."}
+    try:
+        sb.table("settings").select("id").limit(1).execute()
+        return {"mode": "supabase", "durable": True}
+    except Exception as e:
+        print(
+            f"[storage] Supabase reachable check failed: {e}",
+            file=sys.stderr,
+        )
+        return {
+            "mode": "supabase_error",
+            "durable": False,
+            "error": str(e),
+            "diag": {
+                "supabase_url_set": url_set,
+                "supabase_key_set": key_set,
+                "supabase_pkg_ok": pkg_ok,
+            },
+        }
 
 
 def _smart_merge(base: dict, override: dict) -> None:
