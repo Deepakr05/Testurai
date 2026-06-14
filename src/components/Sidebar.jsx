@@ -28,7 +28,7 @@ export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { activeProvider, setActiveProvider } = useContext(ProviderContext)
-  const { user, hasRole } = useContext(AuthContext)
+  const { user, hasRole, loading: authLoading } = useContext(AuthContext)
   const [providers, setProviders] = useState([])
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -36,13 +36,14 @@ export default function Sidebar() {
   const dropdownRef = useRef(null)
 
   useEffect(() => {
+    if (authLoading) return  // wait until the auth token is restored
     axios.get('/api/settings/providers')
       .then(r => {
         setProviders(r.data.data.providers || [])
         if (!activeProvider) setActiveProvider(r.data.data.active_provider || '')
       })
       .catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     function handleClick(e) {

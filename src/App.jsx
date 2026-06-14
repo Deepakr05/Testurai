@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import axios from 'axios'
 import { ProviderContext } from './context/ProviderContext'
 import { AuthProvider } from './context/AuthContext'
 import Sidebar from './components/Sidebar'
@@ -18,12 +17,6 @@ import UserManagement from './pages/UserManagement'
 
 function AppLayout() {
   const [activeProvider, setActiveProvider] = useState('')
-
-  useEffect(() => {
-    axios.get('/api/settings/providers')
-      .then(r => setActiveProvider(r.data.data.active_provider || 'openai'))
-      .catch(() => {})
-  }, [])
 
   return (
     <ProviderContext.Provider value={{ activeProvider, setActiveProvider }}>
