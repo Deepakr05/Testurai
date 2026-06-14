@@ -206,6 +206,13 @@ body {
   letter-spacing: 0.3px;
 }
 
+.top-bar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-2);
+  margin: 0 4px;
+}
+
 .top-bar-signout {
   background: none;
   border: 1px solid var(--border-2);

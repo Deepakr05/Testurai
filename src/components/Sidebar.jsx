@@ -35,17 +35,6 @@ export default function Sidebar() {
   const [error, setError] = useState('')
   const dropdownRef = useRef(null)
 
-  const [theme, setTheme] = useState(() => localStorage.getItem('tm_theme') || 'dark')
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('tm_theme', theme)
-  }, [theme])
-
-  function toggleTheme() {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
-  }
-
   useEffect(() => {
     axios.get('/api/settings/providers')
       .then(r => {
@@ -171,15 +160,8 @@ export default function Sidebar() {
       )}
 
       <div className="sidebar-footer">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px' }}>
+        <div style={{ padding: '8px 16px' }}>
           <div className="sidebar-version">TestMaster v1.0</div>
-          <button
-            className="theme-toggle-btn"
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          >
-            {theme === 'dark' ? '☀️' : '🌙'}
-          </button>
         </div>
       </div>
     </div>
