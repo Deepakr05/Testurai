@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useContext } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import { ProviderContext } from '../context/ProviderContext'
 
-const FORMATS  = ['unit', 'integration', 'e2e', 'security']
-const PROVIDERS = ['openai', 'anthropic', 'google', 'groq', 'local_llm']
+const FORMATS = ['unit', 'integration', 'e2e', 'security']
 
 const LOAD_STEPS = [
   'Fetching Jira Issue',
@@ -15,6 +15,7 @@ const LOAD_STEPS = [
 export default function Generate() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const { activeProvider } = useContext(ProviderContext)
 
   const [jiraId, setJiraId] = useState(params.get('jira') || '')
   const [issue,  setIssue]  = useState(null)
@@ -78,11 +79,12 @@ export default function Generate() {
 
     try {
       const r = await axios.post('/api/generate', {
-        jira_issue_id:        issue.id,
-        include_sub_tasks:    subTasks,
+        jira_issue_id:          issue.id,
+        llm_provider:           activeProvider,
+        include_sub_tasks:      subTasks,
         include_negative_cases: negCases,
-        detail_level:         detailLevel,
-        test_plan_format:     formats,
+        detail_level:           detailLevel,
+        test_plan_format:       formats,
       })
       clearInterval(loadInterval.current)
       showToast('Success! Redirecting to test plan...', 'success')

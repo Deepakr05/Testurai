@@ -1,11 +1,13 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useContext } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import { ProviderContext } from '../context/ProviderContext'
 
 export default function TestGenerator() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const paramTc = searchParams.get('tc') || ''
+  const { activeProvider } = useContext(ProviderContext)
 
   const [testCases, setTestCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -57,7 +59,7 @@ export default function TestGenerator() {
 
   function handleGenerateScript(plan_id, tc_id) {
     setGenerateLoading(tc_id)
-    axios.post(`/api/generate-script/${plan_id}/${tc_id}`)
+    axios.post(`/api/generate-script/${plan_id}/${tc_id}`, { provider: activeProvider })
       .then(() => { fetchCases(); showToast('Script generated successfully!', 'success') })
       .catch(e => showToast(e.response?.data?.error || 'Failed to generate script', 'error'))
       .finally(() => setGenerateLoading(null))
@@ -128,7 +130,7 @@ export default function TestGenerator() {
     for(let i=0; i<toGenerate.length; i++) {
         const tc = toGenerate[i]
         try {
-            await axios.post(`/api/generate-script/${tc.plan_id}/${tc.id}`)
+            await axios.post(`/api/generate-script/${tc.plan_id}/${tc.id}`, { provider: activeProvider })
             successCount++
             setBatchGenStatus(`${i+1}/${toGenerate.length}`)
         } catch(e) {

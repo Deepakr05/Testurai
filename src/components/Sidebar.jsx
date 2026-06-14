@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useContext } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { ProviderContext } from '../context/ProviderContext'
 
 const NAV = [
   { path: '/dashboard', label: 'Dashboard', icon: '▤' },
@@ -22,8 +23,8 @@ const PROVIDER_META = {
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { activeProvider, setActiveProvider } = useContext(ProviderContext)
   const [providers, setProviders] = useState([])
-  const [active, setActive] = useState('')
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [error, setError] = useState('')
@@ -48,10 +49,12 @@ export default function Sidebar() {
     axios.get('/api/settings/providers')
       .then(r => {
         setProviders(r.data.data.providers || [])
-        setActive(r.data.data.active_provider || '')
+        // Only set context if it hasn't been initialised yet (App.jsx also
+        // fetches on mount; this is a fallback for slow-load edge cases).
+        if (!activeProvider) setActiveProvider(r.data.data.active_provider || '')
       })
       .catch(() => {})
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -65,14 +68,14 @@ export default function Sidebar() {
   }, [])
 
   async function switchProvider(providerId) {
-    if (providerId === active) { setOpen(false); return }
+    if (providerId === activeProvider) { setOpen(false); return }
     setSwitching(true)
     setError('')
     try {
       const r = await axios.patch('/api/settings/active-provider', { provider: providerId })
-      setActive(r.data.data.active_provider)
-      // Update providers list locally
-      setProviders(prev => prev.map(p => ({ ...p, active: p.id === providerId })))
+      const confirmed = r.data.data.active_provider
+      setActiveProvider(confirmed)           // push into global context
+      setProviders(prev => prev.map(p => ({ ...p, active: p.id === confirmed })))
       setOpen(false)
     } catch (e) {
       setError(e.response?.data?.error || 'Switch failed')
@@ -82,8 +85,8 @@ export default function Sidebar() {
     }
   }
 
-  const activeMeta = PROVIDER_META[active] || {}
-  const activeProvider = providers.find(p => p.id === active)
+  const activeMeta = PROVIDER_META[activeProvider] || {}
+  const activeProviderInfo = providers.find(p => p.id === activeProvider)
 
   return (
     <div className="sidebar fade-in">
@@ -125,7 +128,7 @@ export default function Sidebar() {
             />
             <div className="model-selector-info">
               <div className="model-selector-name">{activeMeta.name || 'Select Model'}</div>
-              <div className="model-selector-model">{activeProvider?.model || '—'}</div>
+              <div className="model-selector-model">{activeProviderInfo?.model || '—'}</div>
             </div>
           </div>
           <span className={`model-selector-chevron ${open ? 'open' : ''}`}>▾</span>
@@ -140,7 +143,7 @@ export default function Sidebar() {
               return (
                 <div
                   key={p.id}
-                  className={`model-dropdown-item ${p.id === active ? 'active' : ''} ${!p.has_key && p.id !== 'local_llm' ? 'no-key' : ''}`}
+                  className={`model-dropdown-item ${p.id === activeProvider ? 'active' : ''} ${!p.has_key && p.id !== 'local_llm' ? 'no-key' : ''}`}
                   onClick={() => switchProvider(p.id)}
                 >
                   <span
@@ -151,7 +154,7 @@ export default function Sidebar() {
                     <div className="model-dropdown-name">{meta.name || p.id}</div>
                     <div className="model-dropdown-model">{p.model}</div>
                   </div>
-                  {p.id === active && <span className="model-dropdown-check">✓</span>}
+                  {p.id === activeProvider && <span className="model-dropdown-check">✓</span>}
                   {!p.has_key && p.id !== 'local_llm' && (
                     <span className="model-dropdown-nokey" title="No API key configured">🔑</span>
                   )}

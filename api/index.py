@@ -335,8 +335,11 @@ def generate_script(plan_id: str, tc_id: str):
         if not tc: return err("Test case not found", 404)
         
         settings = load_settings()
-        provider = settings.get("llm", {}).get("active_provider", "openai")
-        
+        body = request.get_json(force=True) or {}
+        # Provider from the request body takes priority (sent by the frontend
+        # context); fall back to the stored active_provider for API callers.
+        provider = body.get("provider") or settings.get("llm", {}).get("active_provider", "openai")
+
         system_prompt = "You are an expert QA engineer writing robust Playwright TypeScript tests. ONLY return valid TypeScript code. Do not wrap code in markdown fences if possible."
         
         prompt = f"""Generate a pure Playwright TypeScript test for the following test case:
@@ -537,15 +540,10 @@ def settings_active_provider():
         if provider not in known:
             return err(f"Unknown provider: '{provider}'")
 
-        # Only validate the API key for the provider being selected
+        # No key validation here — switching is always allowed; the key error
+        # surfaces at generation time with a clear message instead of blocking
+        # the user from selecting a provider they intend to configure.
         cfg = known[provider]
-        if provider != "local_llm" and not cfg.get("api_key", ""):
-            return err(
-                f"No API key configured for '{provider}'. "
-                "Go to Settings → LLM Models to add one.",
-                400,
-            )
-
         settings["llm"]["active_provider"] = provider
         save_settings(settings)
         return ok({
