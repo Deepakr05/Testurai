@@ -4,20 +4,21 @@ import { AuthContext } from '../context/AuthContext'
 
 export default function Login() {
   const navigate = useNavigate()
-  const { login, user, loading } = useContext(AuthContext)
+  const { login, user, loading: authLoading } = useContext(AuthContext)
 
   useEffect(() => {
-    if (!loading && user) navigate('/dashboard', { replace: true })
-  }, [user, loading, navigate])
+    if (!authLoading && user) navigate('/dashboard', { replace: true })
+  }, [user, authLoading, navigate])
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!email || !password) return
-    setLoading(true)
+    setSubmitting(true)
     setError('')
     try {
       await login(email, password)
@@ -25,7 +26,7 @@ export default function Login() {
     } catch (e) {
       setError(e.response?.data?.error || 'Login failed. Check your credentials.')
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
@@ -88,10 +89,10 @@ export default function Login() {
           <button
             type="submit"
             className="btn btn-primary btn-lg"
-            disabled={loading}
+            disabled={submitting}
             style={{ width: '100%' }}
           >
-            {loading
+            {submitting
               ? <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
               : 'Sign In'}
           </button>
