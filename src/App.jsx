@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import axios from 'axios'
 import { ProviderContext } from './context/ProviderContext'
+import { AuthProvider } from './context/AuthContext'
 import Sidebar from './components/Sidebar'
+import ProtectedRoute from './components/ProtectedRoute'
 import Dashboard from './pages/Dashboard'
 import Generate from './pages/Generate'
 import History from './pages/History'
@@ -10,8 +12,10 @@ import Settings from './pages/Settings'
 import ViewPlan from './pages/ViewPlan'
 import TestCaseDashboard from './pages/TestCaseDashboard'
 import TestGenerator from './pages/TestGenerator'
+import Login from './pages/Login'
+import UserManagement from './pages/UserManagement'
 
-export default function App() {
+function AppLayout() {
   const [activeProvider, setActiveProvider] = useState('')
 
   useEffect(() => {
@@ -26,17 +30,29 @@ export default function App() {
         <Sidebar />
         <main className="main-content">
           <Routes>
-            <Route path="/"              element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard"     element={<Dashboard />} />
-            <Route path="/generate"      element={<Generate />} />
-            <Route path="/history"       element={<History />} />
-            <Route path="/test-cases"    element={<TestCaseDashboard />} />
-            <Route path="/test-generator" element={<TestGenerator />} />
-            <Route path="/plan/:id"      element={<ViewPlan />} />
-            <Route path="/settings"      element={<Settings />} />
+            <Route path="/"               element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard"      element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/generate"       element={<ProtectedRoute minRole="developer"><Generate /></ProtectedRoute>} />
+            <Route path="/history"        element={<ProtectedRoute><History /></ProtectedRoute>} />
+            <Route path="/test-cases"     element={<ProtectedRoute><TestCaseDashboard /></ProtectedRoute>} />
+            <Route path="/test-generator" element={<ProtectedRoute minRole="developer"><TestGenerator /></ProtectedRoute>} />
+            <Route path="/plan/:id"       element={<ProtectedRoute><ViewPlan /></ProtectedRoute>} />
+            <Route path="/settings"       element={<ProtectedRoute minRole="developer"><Settings /></ProtectedRoute>} />
+            <Route path="/users"          element={<ProtectedRoute minRole="admin"><UserManagement /></ProtectedRoute>} />
           </Routes>
         </main>
       </div>
     </ProviderContext.Provider>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/*" element={<AppLayout />} />
+      </Routes>
+    </AuthProvider>
   )
 }
