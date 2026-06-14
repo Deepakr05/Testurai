@@ -2,14 +2,16 @@ import os
 import re
 import sys
 import json
+import functools
 import traceback
+import urllib.request
+import urllib.error
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 app = Flask(__name__)
 
-# CORS allowlist. Defaults cover local dev + the production Vercel host;
-# override via FRONTEND_ORIGIN (comma-separated) on deployment.
+# CORS allowlist — defaults cover local dev + the production Vercel host.
 _DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -18,42 +20,149 @@ _DEFAULT_ORIGINS = [
 _env_origins = os.getenv("FRONTEND_ORIGIN", "").strip()
 _allowed_origins = (
     [o.strip() for o in _env_origins.split(",") if o.strip()]
-    if _env_origins
-    else _DEFAULT_ORIGINS
+    if _env_origins else _DEFAULT_ORIGINS
 )
 CORS(app, resources={r"/api/*": {"origins": _allowed_origins}})
 
-# Path-parameter validators. Reject obviously malformed input at the edge so
-# downstream code (Jira API, file paths, DB lookups) can trust its inputs.
-_JIRA_ID_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$")
-_PLAN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-_TC_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+# Path-parameter validators.
+_JIRA_ID_RE  = re.compile(r"^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$")
+_PLAN_ID_RE  = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_TC_ID_RE    = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_USER_ID_RE  = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+def _valid_jira_id(v): return bool(v) and bool(_JIRA_ID_RE.match(v.strip().upper()))
+def _valid_plan_id(v): return bool(v) and bool(_PLAN_ID_RE.match(v))
+def _valid_tc_id(v):   return bool(v) and bool(_TC_ID_RE.match(v))
+def _valid_user_id(v): return bool(v) and bool(_USER_ID_RE.match(v.strip()))
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# Set AUTH_DISABLED=true in .env to bypass auth during local development
+# without a Supabase instance.
+_AUTH_DISABLED = os.getenv("AUTH_DISABLED", "").lower() in ("1", "true", "yes")
+
+_ROLE_LEVELS = {"normal": 0, "developer": 1, "admin": 2}
 
 
-def _valid_jira_id(value: str) -> bool:
-    return bool(value) and bool(_JIRA_ID_RE.match(value.strip().upper()))
+def _supabase_url() -> str:
+    return os.getenv("SUPABASE_URL", "").rstrip("/")
 
 
-def _valid_plan_id(value: str) -> bool:
-    return bool(value) and bool(_PLAN_ID_RE.match(value))
+def _supabase_key() -> str:
+    return os.getenv("SUPABASE_KEY", "")
 
 
-def _valid_tc_id(value: str) -> bool:
-    return bool(value) and bool(_TC_ID_RE.match(value))
+def _verify_token(token: str):
+    """
+    Verify a Supabase JWT against the Auth REST API, then fetch the user's
+    role profile from PostgREST. Returns (user_dict, profile_dict) or
+    (None, None) on failure.
+    """
+    url = _supabase_url()
+    key = _supabase_key()
+    if not url or not key:
+        return None, None
+    try:
+        # 1. Validate JWT via Supabase Auth
+        req = urllib.request.Request(
+            f"{url}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}", "apikey": key},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            user_data = json.loads(resp.read().decode())
+        user_id = user_data.get("id")
+        if not user_id:
+            return None, None
 
-# -- THE SAFETY NET --
+        # 2. Fetch role from user_profiles via PostgREST
+        req2 = urllib.request.Request(
+            f"{url}/rest/v1/user_profiles?id=eq.{user_id}&select=*",
+            headers={"Authorization": f"Bearer {token}", "apikey": key},
+        )
+        with urllib.request.urlopen(req2, timeout=8) as resp2:
+            profiles = json.loads(resp2.read().decode())
+
+        if not profiles:
+            return None, None
+        return user_data, profiles[0]
+
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return None, None
+        print(f"[auth] Token verify HTTP {e.code}", file=sys.stderr)
+        return None, None
+    except Exception as e:
+        print(f"[auth] Token verify error: {e}", file=sys.stderr)
+        return None, None
+
+
+def require_auth(min_role: str = "normal"):
+    """Decorator: verify Supabase JWT and enforce minimum role."""
+    def decorator(f):
+        @functools.wraps(f)
+        def decorated(*args, **kwargs):
+            if _AUTH_DISABLED:
+                request.auth_user = {"id": "dev", "email": "dev@local"}
+                request.auth_profile = {"role": "admin", "email": "dev@local"}
+                return f(*args, **kwargs)
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return err("Authentication required", 401)
+            token = auth_header[7:]
+            user, profile = _verify_token(token)
+            if not user or not profile:
+                return err("Invalid or expired session", 401)
+            role = profile.get("role", "normal")
+            if (_ROLE_LEVELS.get(role, -1) < _ROLE_LEVELS.get(min_role, 999)):
+                return err("Insufficient permissions", 403)
+            request.auth_user = user
+            request.auth_profile = profile
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+def _admin_rest(method: str, path: str, body: dict | None = None):
+    """Call Supabase Auth Admin REST API using the service role key."""
+    url = _supabase_url()
+    svc_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    if not url or not svc_key:
+        return None, "SUPABASE_SERVICE_KEY not configured"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"{url}/auth/v1/admin/{path}",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "apikey": svc_key,
+            "Authorization": f"Bearer {svc_key}",
+        },
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode().strip()
+            return json.loads(body) if body else {}, None
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode()).get("msg", str(e))
+        except Exception:
+            msg = str(e)
+        return None, msg
+    except Exception as e:
+        return None, str(e)
+
+
+# ── Bootstrap ────────────────────────────────────────────────────────────────
 BOOTSTRAP_ERROR = None
 try:
     from pathlib import Path
     from datetime import datetime
     from dotenv import load_dotenv
 
-    # Load .env IF it exists (don't crash if it doesn't)
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path)
 
-    # Ensure tools/ is importable from root
     root_path = str(Path(__file__).parent.parent)
     if root_path not in sys.path:
         sys.path.insert(0, root_path)
@@ -61,24 +170,29 @@ try:
     from tools.storage_manager import (
         load_settings, save_settings, get_settings_masked,
         load_history, get_test_plan, delete_test_plan, get_stats,
-        get_persistence_mode,
+        get_persistence_mode, get_supabase,
     )
     from tools.jira_client import fetch_issue, test_connection as jira_test_connection
     from tools.llm_client import test_connection as llm_test_connection
     from tools.test_plan_generator import generate_test_plan
     from tools.export_engine import to_docx, to_pdf
 
-except Exception as e:
+except Exception:
     BOOTSTRAP_ERROR = traceback.format_exc()
 
-# Fallback route in case of bootstrap failure
+
 @app.route("/api/bootstrap-check")
 def bootstrap_check():
     if BOOTSTRAP_ERROR:
-        return f"<pre>BOOTSTRAP CRASH:\n{BOOTSTRAP_ERROR}\n\nPATH: {os.getcwd()}\nSYS.PATH: {sys.path}</pre>", 500
+        return (
+            f"<pre>BOOTSTRAP CRASH:\n{BOOTSTRAP_ERROR}\n\n"
+            f"PATH: {os.getcwd()}\nSYS.PATH: {sys.path}</pre>",
+            500,
+        )
     return jsonify({"status": "ok", "message": "Bootstrap successful"}), 200
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+# ── Response helpers ─────────────────────────────────────────────────────────
 
 def ok(data=None, **kwargs):
     payload = {"success": True}
@@ -92,22 +206,204 @@ def err(message: str, status: int = 400):
     return jsonify({"success": False, "error": message}), status
 
 
-# ─── Dashboard ───────────────────────────────────────────────────────────────
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json(force=True) or {}
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    if not email or not password:
+        return err("Email and password are required")
+
+    url = _supabase_url()
+    key = _supabase_key()
+    if not url or not key:
+        return err("Auth service not configured", 503)
+
+    try:
+        payload = json.dumps({"email": email, "password": password}).encode()
+        req = urllib.request.Request(
+            f"{url}/auth/v1/token?grant_type=password",
+            data=payload,
+            headers={"Content-Type": "application/json", "apikey": key},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            auth_data = json.loads(resp.read().decode())
+
+        access_token = auth_data.get("access_token")
+        user_data = auth_data.get("user", {})
+        user_id = user_data.get("id")
+        if not access_token or not user_id:
+            return err("Login failed", 401)
+
+        # Fetch role profile via PostgREST
+        req2 = urllib.request.Request(
+            f"{url}/rest/v1/user_profiles?id=eq.{user_id}&select=*",
+            headers={"Authorization": f"Bearer {access_token}", "apikey": key},
+        )
+        with urllib.request.urlopen(req2, timeout=8) as resp2:
+            profiles = json.loads(resp2.read().decode())
+
+        if not profiles:
+            return err("User profile not found. Contact your admin.", 403)
+        profile = profiles[0]
+
+        return ok({
+            "access_token": access_token,
+            "user": {
+                "id": user_id,
+                "email": user_data.get("email", email),
+                "role": profile.get("role", "normal"),
+                "full_name": profile.get("full_name", ""),
+            },
+        })
+
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode()).get("error_description") or "Invalid credentials"
+        except Exception:
+            msg = "Invalid credentials"
+        return err(msg, 401 if e.code in (400, 401) else 500)
+    except Exception as e:
+        return err(f"Login failed: {e}", 500)
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth("normal")
+def auth_me():
+    profile = request.auth_profile
+    user = request.auth_user
+    return ok({
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "role": profile.get("role", "normal"),
+        "full_name": profile.get("full_name", ""),
+    })
+
+
+# ── User management (admin only) ─────────────────────────────────────────────
+
+@app.route("/api/users", methods=["GET"])
+@require_auth("admin")
+def users_list():
+    try:
+        sb = get_supabase()
+        if not sb:
+            return err("Database not available", 503)
+        resp = sb.table("user_profiles").select("*").order("created_at").execute()
+        return ok(resp.data or [])
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/users", methods=["POST"])
+@require_auth("admin")
+def users_create():
+    body = request.get_json(force=True) or {}
+    email     = (body.get("email") or "").strip()
+    password  = body.get("password") or ""
+    role      = body.get("role", "normal")
+    full_name = (body.get("full_name") or "").strip()
+
+    if not email or not password:
+        return err("Email and password are required")
+    if role not in ("normal", "developer", "admin"):
+        return err("Invalid role. Must be normal, developer, or admin.")
+
+    # Create auth user via admin API (requires SUPABASE_SERVICE_KEY)
+    user_data, error = _admin_rest("POST", "users", {
+        "email": email,
+        "password": password,
+        "email_confirm": True,
+        "user_metadata": {"full_name": full_name},
+    })
+    if error:
+        return err(f"User creation failed: {error}", 500)
+
+    new_user_id = user_data.get("id")
+    if not new_user_id:
+        return err("User creation failed: no ID returned", 500)
+
+    try:
+        sb = get_supabase()
+        if sb:
+            # Trigger may already have created the row; upsert to set role
+            sb.table("user_profiles").upsert({
+                "id": new_user_id,
+                "email": email,
+                "full_name": full_name,
+                "role": role,
+            }).execute()
+    except Exception as e:
+        print(f"[auth] Profile upsert after create failed: {e}", file=sys.stderr)
+
+    return ok({"id": new_user_id, "email": email, "role": role, "full_name": full_name})
+
+
+@app.route("/api/users/<string:user_id>", methods=["PUT"])
+@require_auth("admin")
+def users_update(user_id: str):
+    if not _valid_user_id(user_id):
+        return err("Invalid user id.")
+    body = request.get_json(force=True) or {}
+    role      = body.get("role")
+    full_name = body.get("full_name")
+
+    if role and role not in ("normal", "developer", "admin"):
+        return err("Invalid role.")
+
+    update = {}
+    if role:
+        update["role"] = role
+    if full_name is not None:
+        update["full_name"] = str(full_name).strip()
+    if not update:
+        return err("Nothing to update")
+
+    try:
+        sb = get_supabase()
+        if not sb:
+            return err("Database not available", 503)
+        resp = sb.table("user_profiles").update(update).eq("id", user_id).execute()
+        if not resp.data:
+            return err("User not found", 404)
+        return ok(resp.data[0])
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/users/<string:user_id>", methods=["DELETE"])
+@require_auth("admin")
+def users_delete(user_id: str):
+    if not _valid_user_id(user_id):
+        return err("Invalid user id.")
+    if request.auth_user.get("id") == user_id:
+        return err("Cannot delete your own account.", 400)
+
+    result, error = _admin_rest("DELETE", f"users/{user_id}")
+    if error and "not found" not in str(error).lower():
+        return err(f"Delete failed: {error}", 500)
+    return ok({"deleted": user_id})
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/stats", methods=["GET"])
+@require_auth("normal")
 def stats():
-    """Dashboard statistics: total plans, jira issues, avg time, active model."""
     try:
         return ok(get_stats())
     except Exception as e:
         return err(str(e), 500)
 
 
-# ─── Jira ────────────────────────────────────────────────────────────────────
+# ── Jira ──────────────────────────────────────────────────────────────────────
 
 @app.route("/api/jira/issue/<string:issue_id>", methods=["GET"])
+@require_auth("developer")
 def jira_issue(issue_id: str):
-    """Fetch and return a Jira issue preview."""
     if not _valid_jira_id(issue_id):
         return err("Invalid Jira issue id. Expected format like ABC-123.")
     try:
@@ -120,15 +416,11 @@ def jira_issue(issue_id: str):
         return err(f"Unexpected error: {e}", 500)
 
 
-# ─── Generate ────────────────────────────────────────────────────────────────
+# ── Generate ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/generate", methods=["POST"])
+@require_auth("developer")
 def generate():
-    """
-    Full test plan generation pipeline.
-    Body: { jira_issue_id, llm_provider, include_sub_tasks, include_negative_cases,
-            detail_level, test_plan_format }
-    """
     try:
         body = request.get_json(force=True) or {}
         jira_issue_id = (body.get("jira_issue_id") or "").strip()
@@ -136,7 +428,6 @@ def generate():
             return err("jira_issue_id is required")
         if not _valid_jira_id(jira_issue_id):
             return err("Invalid Jira issue id. Expected format like ABC-123.")
-
         body["jira_issue_id"] = jira_issue_id.upper()
         record = generate_test_plan(body)
         return ok(record)
@@ -148,14 +439,11 @@ def generate():
         return err(f"Unexpected error: {e}", 500)
 
 
-# ─── History ─────────────────────────────────────────────────────────────────
+# ── History ───────────────────────────────────────────────────────────────────
 
 @app.route("/api/history", methods=["GET"])
+@require_auth("normal")
 def history():
-    """
-    List all test plans, optionally filtered.
-    Query params: q (search), filter (all|week|month|starred)
-    """
     try:
         q = request.args.get("q", "").lower()
         f = request.args.get("filter", "all")
@@ -163,8 +451,6 @@ def history():
         records = load_history()
         records = sorted(records, key=lambda r: r.get("generated_at", ""), reverse=True)
 
-        # Filter by date
-        now = datetime.utcnow()
         if f == "week":
             records = [r for r in records if _within_days(r.get("generated_at", ""), 7)]
         elif f == "month":
@@ -172,7 +458,6 @@ def history():
         elif f == "starred":
             records = [r for r in records if r.get("starred", False)]
 
-        # Search filter
         if q:
             records = [
                 r for r in records
@@ -181,7 +466,6 @@ def history():
                 or q in r.get("title", "").lower()
             ]
 
-        # Return summary view (no full markdown for list performance)
         summary = [{
             "id": r["id"],
             "jira_id": r.get("jira_id", ""),
@@ -201,180 +485,9 @@ def history():
         return err(str(e), 500)
 
 
-@app.route("/api/test-cases", methods=["GET"])
-def all_test_cases():
-    """
-    Return a flattened list of all test cases across all plans.
-    Used for the Test Cases Dashboard.
-    """
-    try:
-        from tools.storage_manager import load_history
-        records = load_history()
-        
-        test_cases = []
-        for r in records:
-            tcs = r.get("content", {}).get("test_cases", [])
-            for tc in tcs:
-                tc_copy = dict(tc)
-                # Enrich with plan data
-                tc_copy["plan_id"] = r["id"]
-                tc_copy["jira_id"] = r.get("jira_id", "")
-                tc_copy["jira_title"] = r.get("jira_title", "")
-                tc_copy["generated_at"] = r.get("generated_at", "")
-                test_cases.append(tc_copy)
-                
-        # Sort by generated_at descending primarily
-        test_cases.sort(key=lambda x: x.get("generated_at", ""), reverse=True)
-        return ok(test_cases)
-    except Exception as e:
-        return err(str(e), 500)
-
-
-@app.route("/api/test-cases/<string:plan_id>", methods=["POST"])
-def tc_create(plan_id: str):
-    if not _valid_plan_id(plan_id):
-        return err("Invalid plan id.")
-    try:
-        from tools.storage_manager import save_test_plan
-        record = get_test_plan(plan_id)
-        if not record: return err("Plan not found", 404)
-        
-        body = request.get_json(force=True) or {}
-        # Generate new TC-XXX ID based on max existing
-        tcs = record.get("content", {}).setdefault("test_cases", [])
-        max_num = 0
-        for tc in tcs:
-            if tc.get("id", "").startswith("TC-"):
-                try:
-                    num = int(tc["id"].replace("TC-", ""))
-                    max_num = max(max_num, num)
-                except (ValueError, TypeError):
-                    # Malformed TC id (non-numeric suffix); skip it.
-                    continue
-        
-        new_id = f"TC-{max_num + 1:03d}"
-        new_tc = {
-            "id": new_id,
-            "title": body.get("title", "New Test Case"),
-            "priority": body.get("priority", "Medium"),
-            "type": body.get("type", "Positive"),
-            "preconditions": body.get("preconditions", []),
-            "steps": body.get("steps", []),
-            "expected_result": body.get("expected_result", ""),
-            "test_data": body.get("test_data", {})
-        }
-        tcs.append(new_tc)
-        record["test_case_count"] = len(tcs)
-        save_test_plan(record)
-        return ok(new_tc)
-    except Exception as e:
-        return err(str(e), 500)
-
-
-@app.route("/api/test-cases/<string:plan_id>/<string:tc_id>", methods=["PUT"])
-def tc_update(plan_id: str, tc_id: str):
-    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
-        return err("Invalid plan or test case id.")
-    try:
-        from tools.storage_manager import save_test_plan
-        record = get_test_plan(plan_id)
-        if not record: return err("Plan not found", 404)
-        
-        body = request.get_json(force=True) or {}
-        tcs = record.get("content", {}).get("test_cases", [])
-        
-        for idx, tc in enumerate(tcs):
-            if tc.get("id") == tc_id:
-                tcs[idx] = body  # Replace with the updated JSON payload
-                record["content"]["test_cases"] = tcs
-                save_test_plan(record)
-                return ok(body)
-                
-        return err("Test case not found", 404)
-    except Exception as e:
-        return err(str(e), 500)
-
-
-@app.route("/api/test-cases/<string:plan_id>/<string:tc_id>", methods=["DELETE"])
-def tc_delete(plan_id: str, tc_id: str):
-    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
-        return err("Invalid plan or test case id.")
-    try:
-        from tools.storage_manager import save_test_plan
-        record = get_test_plan(plan_id)
-        if not record: return err("Plan not found", 404)
-        
-        tcs = record.get("content", {}).get("test_cases", [])
-        initial_len = len(tcs)
-        tcs = [tc for tc in tcs if tc.get("id") != tc_id]
-        
-        if len(tcs) == initial_len:
-            return err("Test case not found", 404)
-            
-        record["content"]["test_cases"] = tcs
-        record["test_case_count"] = len(tcs)
-        save_test_plan(record)
-        return ok({"deleted": tc_id})
-    except Exception as e:
-        return err(str(e), 500)
-
-
-@app.route("/api/generate-script/<string:plan_id>/<string:tc_id>", methods=["POST"])
-def generate_script(plan_id: str, tc_id: str):
-    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
-        return err("Invalid plan or test case id.")
-    try:
-        from tools.storage_manager import load_settings, save_test_plan
-        from tools.llm_client import generate
-        
-        record = get_test_plan(plan_id)
-        if not record: return err("Plan not found", 404)
-        
-        tcs = record.get("content", {}).get("test_cases", [])
-        tc = next((t for t in tcs if t.get("id") == tc_id), None)
-        if not tc: return err("Test case not found", 404)
-        
-        settings = load_settings()
-        body = request.get_json(force=True) or {}
-        # Provider from the request body takes priority (sent by the frontend
-        # context); fall back to the stored active_provider for API callers.
-        provider = body.get("provider") or settings.get("llm", {}).get("active_provider", "openai")
-
-        system_prompt = "You are an expert QA engineer writing robust Playwright TypeScript tests. ONLY return valid TypeScript code. Do not wrap code in markdown fences if possible."
-        
-        prompt = f"""Generate a pure Playwright TypeScript test for the following test case:
-Title: {tc.get('title')}
-Preconditions: {', '.join(tc.get('preconditions', []))}
-Steps: {', '.join(tc.get('steps', []))}
-Expected Result: {tc.get('expected_result')}
-Test Data: {json.dumps(tc.get('test_data', {}))}
-
-Return valid TypeScript code starting with import {{ test, expect }} from '@playwright/test';
-"""
-        
-        script = generate(prompt, system_prompt, provider, settings).strip()
-        
-        # Clean markdown fences
-        if script.startswith("```"):
-            lines = script.split("\n")
-            if len(lines) > 1 and lines[0].startswith("```"):
-                lines = lines[1:]
-            if len(lines) > 0 and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            script = "\n".join(lines).strip()
-            
-        tc["playwright_script"] = script
-        record["content"]["test_cases"] = tcs
-        save_test_plan(record)
-        
-        return ok({"playwright_script": script})
-    except Exception as e:
-        return err(str(e), 500)
-
-
 @app.route("/api/history/<string:plan_id>", methods=["GET"])
+@require_auth("normal")
 def history_detail(plan_id: str):
-    """Get full test plan record including markdown content."""
     if not _valid_plan_id(plan_id):
         return err("Invalid plan id.")
     try:
@@ -387,8 +500,8 @@ def history_detail(plan_id: str):
 
 
 @app.route("/api/history/<string:plan_id>", methods=["DELETE"])
+@require_auth("admin")
 def history_delete(plan_id: str):
-    """Delete a test plan by ID."""
     if not _valid_plan_id(plan_id):
         return err("Invalid plan id.")
     try:
@@ -401,12 +514,12 @@ def history_delete(plan_id: str):
 
 
 @app.route("/api/history/<string:plan_id>/star", methods=["PATCH"])
+@require_auth("developer")
 def history_star(plan_id: str):
-    """Toggle starred status on a test plan."""
     if not _valid_plan_id(plan_id):
         return err("Invalid plan id.")
     try:
-        from tools.storage_manager import load_history, save_test_plan
+        from tools.storage_manager import save_test_plan
         record = get_test_plan(plan_id)
         if not record:
             return err(f"Test plan '{plan_id}' not found", 404)
@@ -417,59 +530,209 @@ def history_star(plan_id: str):
         return err(str(e), 500)
 
 
-# ─── Export ───────────────────────────────────────────────────────────────────
+# ── Test Cases ────────────────────────────────────────────────────────────────
+
+@app.route("/api/test-cases", methods=["GET"])
+@require_auth("normal")
+def all_test_cases():
+    try:
+        records = load_history()
+        test_cases = []
+        for r in records:
+            tcs = r.get("content", {}).get("test_cases", [])
+            for tc in tcs:
+                tc_copy = dict(tc)
+                tc_copy["plan_id"] = r["id"]
+                tc_copy["jira_id"] = r.get("jira_id", "")
+                tc_copy["jira_title"] = r.get("jira_title", "")
+                tc_copy["generated_at"] = r.get("generated_at", "")
+                test_cases.append(tc_copy)
+        test_cases.sort(key=lambda x: x.get("generated_at", ""), reverse=True)
+        return ok(test_cases)
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/test-cases/<string:plan_id>", methods=["POST"])
+@require_auth("developer")
+def tc_create(plan_id: str):
+    if not _valid_plan_id(plan_id):
+        return err("Invalid plan id.")
+    try:
+        from tools.storage_manager import save_test_plan
+        record = get_test_plan(plan_id)
+        if not record:
+            return err("Plan not found", 404)
+        body = request.get_json(force=True) or {}
+        tcs = record.get("content", {}).setdefault("test_cases", [])
+        max_num = 0
+        for tc in tcs:
+            if tc.get("id", "").startswith("TC-"):
+                try:
+                    max_num = max(max_num, int(tc["id"].replace("TC-", "")))
+                except (ValueError, TypeError):
+                    continue
+        new_id = f"TC-{max_num + 1:03d}"
+        new_tc = {
+            "id": new_id,
+            "title": body.get("title", "New Test Case"),
+            "priority": body.get("priority", "Medium"),
+            "type": body.get("type", "Positive"),
+            "preconditions": body.get("preconditions", []),
+            "steps": body.get("steps", []),
+            "expected_result": body.get("expected_result", ""),
+            "test_data": body.get("test_data", {}),
+        }
+        tcs.append(new_tc)
+        record["test_case_count"] = len(tcs)
+        save_test_plan(record)
+        return ok(new_tc)
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/test-cases/<string:plan_id>/<string:tc_id>", methods=["PUT"])
+@require_auth("developer")
+def tc_update(plan_id: str, tc_id: str):
+    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
+        return err("Invalid plan or test case id.")
+    try:
+        from tools.storage_manager import save_test_plan
+        record = get_test_plan(plan_id)
+        if not record:
+            return err("Plan not found", 404)
+        body = request.get_json(force=True) or {}
+        tcs = record.get("content", {}).get("test_cases", [])
+        for idx, tc in enumerate(tcs):
+            if tc.get("id") == tc_id:
+                tcs[idx] = body
+                record["content"]["test_cases"] = tcs
+                save_test_plan(record)
+                return ok(body)
+        return err("Test case not found", 404)
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/test-cases/<string:plan_id>/<string:tc_id>", methods=["DELETE"])
+@require_auth("developer")
+def tc_delete(plan_id: str, tc_id: str):
+    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
+        return err("Invalid plan or test case id.")
+    try:
+        from tools.storage_manager import save_test_plan
+        record = get_test_plan(plan_id)
+        if not record:
+            return err("Plan not found", 404)
+        tcs = record.get("content", {}).get("test_cases", [])
+        new_tcs = [tc for tc in tcs if tc.get("id") != tc_id]
+        if len(new_tcs) == len(tcs):
+            return err("Test case not found", 404)
+        record["content"]["test_cases"] = new_tcs
+        record["test_case_count"] = len(new_tcs)
+        save_test_plan(record)
+        return ok({"deleted": tc_id})
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/generate-script/<string:plan_id>/<string:tc_id>", methods=["POST"])
+@require_auth("developer")
+def generate_script(plan_id: str, tc_id: str):
+    if not _valid_plan_id(plan_id) or not _valid_tc_id(tc_id):
+        return err("Invalid plan or test case id.")
+    try:
+        from tools.storage_manager import save_test_plan
+        from tools.llm_client import generate
+
+        record = get_test_plan(plan_id)
+        if not record:
+            return err("Plan not found", 404)
+        tcs = record.get("content", {}).get("test_cases", [])
+        tc = next((t for t in tcs if t.get("id") == tc_id), None)
+        if not tc:
+            return err("Test case not found", 404)
+
+        settings = load_settings()
+        body = request.get_json(force=True) or {}
+        provider = body.get("provider") or settings.get("llm", {}).get("active_provider", "openai")
+
+        system_prompt = (
+            "You are an expert QA engineer writing robust Playwright TypeScript tests. "
+            "ONLY return valid TypeScript code. Do not wrap code in markdown fences if possible."
+        )
+        prompt = (
+            f"Generate a pure Playwright TypeScript test for the following test case:\n"
+            f"Title: {tc.get('title')}\n"
+            f"Preconditions: {', '.join(tc.get('preconditions', []))}\n"
+            f"Steps: {', '.join(tc.get('steps', []))}\n"
+            f"Expected Result: {tc.get('expected_result')}\n"
+            f"Test Data: {json.dumps(tc.get('test_data', {}))}\n\n"
+            "Return valid TypeScript code starting with import { test, expect } from '@playwright/test';"
+        )
+
+        script = generate(prompt, system_prompt, provider, settings).strip()
+
+        if script.startswith("```"):
+            lines = script.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            script = "\n".join(lines).strip()
+
+        tc["playwright_script"] = script
+        record["content"]["test_cases"] = tcs
+        save_test_plan(record)
+        return ok({"playwright_script": script})
+    except Exception as e:
+        return err(str(e), 500)
+
+
+# ── Export ────────────────────────────────────────────────────────────────────
 
 @app.route("/api/export-scripts", methods=["POST"])
+@require_auth("developer")
 def export_scripts():
-    """Export test scripts as a ZIP grouped by Jira IDs."""
     try:
         import io, zipfile
         body = request.get_json(force=True) or {}
         scripts = body.get("scripts", [])
-        
         if not scripts:
             return err("No scripts provided", 400)
-            
+
         grouped = {}
         for s in scripts:
-            jid = s.get("jira_id")
-            if not jid: 
-                jid = "UNCATEGORIZED"
+            jid = s.get("jira_id") or "UNCATEGORIZED"
             grouped.setdefault(jid, []).append(s)
-            
+
         mem_zip = io.BytesIO()
         with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             for jid, items in grouped.items():
-                file_content = f"import {{ test, expect }} from '@playwright/test';\n\n"
-                
+                content = "import { test, expect } from '@playwright/test';\n\n"
                 for tc in items:
-                    file_content += f"// ==========================================\n"
-                    file_content += f"// Test Case: {tc.get('tc_id', '')} - {tc.get('title', '')}\n"
-                    file_content += f"// ==========================================\n\n"
-                    
-                    # Remove any native imports since we injected them at top
+                    content += f"// ==========================================\n"
+                    content += f"// {tc.get('tc_id', '')} - {tc.get('title', '')}\n"
+                    content += f"// ==========================================\n\n"
                     script = tc.get("playwright_script", "")
-                    lines = script.split("\n")
-                    clean_lines = [l for l in lines if not l.startswith("import { test")]
-                    file_content += "\n".join(clean_lines).strip()
-                    file_content += "\n\n"
-                    
-                zf.writestr(f"{jid}.spec.ts", file_content)
-                
+                    clean = [l for l in script.split("\n") if not l.startswith("import { test")]
+                    content += "\n".join(clean).strip() + "\n\n"
+                zf.writestr(f"{jid}.spec.ts", content)
+
         mem_zip.seek(0)
         return send_file(
             mem_zip,
             mimetype="application/zip",
             as_attachment=True,
-            download_name="playwright_scripts.zip"
+            download_name="playwright_scripts.zip",
         )
     except Exception as e:
         return err(f"Export failed: {e}", 500)
 
 
 @app.route("/api/export/<string:plan_id>/<string:fmt>", methods=["GET"])
+@require_auth("normal")
 def export(plan_id: str, fmt: str):
-    """Export test plan as docx or pdf. Streams the file."""
     if fmt not in ("docx", "pdf"):
         return err("Format must be 'docx' or 'pdf'")
     if not _valid_plan_id(plan_id):
@@ -478,7 +741,6 @@ def export(plan_id: str, fmt: str):
         record = get_test_plan(plan_id)
         if not record:
             return err(f"Test plan '{plan_id}' not found", 404)
-
         if fmt == "docx":
             buffer = to_docx(record, output_path="buffer")
             mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -487,25 +749,18 @@ def export(plan_id: str, fmt: str):
             buffer = to_pdf(record, output_path="buffer")
             mime = "application/pdf"
             ext = "pdf"
-
         date_str = datetime.now().strftime("%Y%m%d")
         filename = f"{record['jira_id']}_{date_str}.{ext}"
-        
-        return send_file(
-            buffer,
-            mimetype=mime,
-            as_attachment=True,
-            download_name=filename
-        )
+        return send_file(buffer, mimetype=mime, as_attachment=True, download_name=filename)
     except Exception as e:
         return err(f"Export failed: {e}", 500)
 
 
-# ─── Settings ─────────────────────────────────────────────────────────────────
+# ── Settings ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/settings/providers", methods=["GET"])
+@require_auth("normal")
 def settings_providers():
-    """Lightweight list of LLM providers for sidebar selector."""
     try:
         settings = load_settings()
         active = settings.get("llm", {}).get("active_provider", "openai")
@@ -514,61 +769,47 @@ def settings_providers():
         for key, cfg in providers.items():
             has_key = bool(cfg.get("api_key", "")) and cfg.get("api_key", "") != ""
             if key == "local_llm":
-                has_key = True  # Local LLM doesn't need a real key
-            result.append({
-                "id": key,
-                "model": cfg.get("model", ""),
-                "has_key": has_key,
-                "active": key == active,
-            })
+                has_key = True
+            result.append({"id": key, "model": cfg.get("model", ""), "has_key": has_key, "active": key == active})
         return ok({"active_provider": active, "providers": result})
     except Exception as e:
         return err(str(e), 500)
 
 
 @app.route("/api/settings/active-provider", methods=["PATCH"])
+@require_auth("developer")
 def settings_active_provider():
-    """Switch the active LLM provider. Only validates key for the selected provider."""
     try:
         body = request.get_json(force=True) or {}
         provider = body.get("provider", "").strip()
         if not provider:
             return err("provider is required")
-
         settings = load_settings()
         known = settings.get("llm", {}).get("providers", {})
         if provider not in known:
             return err(f"Unknown provider: '{provider}'")
-
-        # No key validation here — switching is always allowed; the key error
-        # surfaces at generation time with a clear message instead of blocking
-        # the user from selecting a provider they intend to configure.
         cfg = known[provider]
         settings["llm"]["active_provider"] = provider
         save_settings(settings)
-        return ok({
-            "active_provider": provider,
-            "model": cfg.get("model", ""),
-        })
+        return ok({"active_provider": provider, "model": cfg.get("model", "")})
     except Exception as e:
         return err(str(e), 500)
 
 
 @app.route("/api/settings", methods=["GET"])
+@require_auth("normal")
 def settings_get():
-    """Return settings with masked API keys plus persistence mode."""
     try:
         data = get_settings_masked()
         data["_persistence"] = get_persistence_mode()
         return ok(data)
     except Exception as e:
-        import traceback
         return err(f"{e} - {traceback.format_exc()}", 500)
 
 
 @app.route("/api/settings/persistence-mode", methods=["GET"])
+@require_auth("normal")
 def settings_persistence():
-    """Return only the persistence mode — useful for the UI banner."""
     try:
         return ok(get_persistence_mode())
     except Exception as e:
@@ -576,18 +817,12 @@ def settings_persistence():
 
 
 @app.route("/api/settings", methods=["PUT"])
+@require_auth("admin")
 def settings_put():
-    """
-    Save settings. Client sends full settings including NEW (unmasked) keys.
-    Masked values (starting with ••) are preserved from current stored settings.
-    """
     try:
         incoming = request.get_json(force=True) or {}
         current = load_settings()
-
-        # Merge: if key starts with ••, keep the stored value
         _merge_preserving_masked(current, incoming)
-
         save_settings(current)
         return ok(get_settings_masked())
     except Exception as e:
@@ -595,74 +830,68 @@ def settings_put():
 
 
 def _merge_preserving_masked(current: dict, incoming: dict, path=""):
-    """Recursively merge incoming into current, skipping masked (••) values."""
     for key, value in incoming.items():
         if isinstance(value, dict) and isinstance(current.get(key), dict):
             _merge_preserving_masked(current[key], value, path=f"{path}.{key}")
         elif isinstance(value, str) and value.startswith("••"):
-            pass  # Keep existing stored value
+            pass
         else:
             current[key] = value
 
 
 @app.route("/api/settings/test-connection", methods=["POST"])
+@require_auth("developer")
 def settings_test():
-    """
-    Test LLM or Jira connection.
-    Body: { type: 'llm' | 'jira', provider?: 'openai' | 'anthropic' | 'google' }
-    """
     try:
         body = request.get_json(force=True) or {}
         connection_type = body.get("type", "llm")
         settings = load_settings()
-
         if connection_type == "jira":
             result = jira_test_connection(settings)
             if not result.get("ok"):
-                source = settings["jira"].get("_source", "Unknown")
-                result["details"] = f"Key Source: {source}"
+                result["details"] = f"Key Source: {settings['jira'].get('_source', 'Unknown')}"
         else:
             provider = body.get("provider", settings["llm"]["active_provider"])
             result = llm_test_connection(provider, settings)
             if not result.get("ok"):
                 provider_cfg = settings["llm"]["providers"].get(provider, {})
-                source = provider_cfg.get("_source", "Unknown")
-                preview = _mask_preview(provider_cfg.get("api_key"))
-                result["details"] = f"Source: {source} | Key Preview: {preview}"
-
+                result["details"] = (
+                    f"Source: {provider_cfg.get('_source', 'Unknown')} | "
+                    f"Key Preview: {_mask_preview(provider_cfg.get('api_key'))}"
+                )
         return ok(result)
     except Exception as e:
         return err(str(e), 500)
 
 
 @app.route("/api/debug-config", methods=["GET"])
+@require_auth("admin")
 def debug_config():
-    """Diagnostic route to trace API key sources (masked for security)."""
     settings = load_settings()
     debug = {
         "jira": {
             "source": settings["jira"].get("_source"),
             "token_preview": _mask_preview(settings["jira"].get("api_token")),
-            "email": settings["jira"].get("email")
+            "email": settings["jira"].get("email"),
         },
-        "llm_providers": {}
+        "llm_providers": {},
     }
     for p, cfg in settings.get("llm", {}).get("providers", {}).items():
         debug["llm_providers"][p] = {
             "source": cfg.get("_source"),
             "key_preview": _mask_preview(cfg.get("api_key")),
-            "model": cfg.get("model")
+            "model": cfg.get("model"),
         }
     return ok(debug)
 
 
-def _mask_preview(key: str | None) -> str:
+def _mask_preview(key):
     if not key or not isinstance(key, str) or len(key) < 6:
         return "MISSING/SHORT"
     return f"{key[:3]}...{key[-3:]} (len: {len(key)})"
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _within_days(iso_str: str, days: int) -> bool:
     try:
@@ -674,7 +903,7 @@ def _within_days(iso_str: str, days: int) -> bool:
         return False
 
 
-# ─── Entry Point ──────────────────────────────────────────────────────────────
+# ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     print("[TestMaster] API starting on http://localhost:5000")
