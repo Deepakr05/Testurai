@@ -86,7 +86,6 @@ Admins are the only ones who can create or delete user accounts. There is no pub
 ```bash
 git clone https://github.com/Deepakr05/Test_master.git
 cd Test_master
-npm install
 pip install -r requirements.txt
 ```
 
