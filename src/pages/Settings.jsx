@@ -185,7 +185,7 @@ export default function Settings() {
                         </div>
                         {isActive && <span style={{ color: 'var(--cyan)', fontSize: 16 }}>✦</span>}
                       </div>
-                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{meta.model}</div>
+                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{cfg.model || meta.model}</div>
                       {result && (
                         <span className={`badge ${result.ok ? 'badge-green' : 'badge-red'}`} style={{ marginBottom: 8 }}>
                           {result.ok ? '✓ Connected' : '✗ Failed'}

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { AuthContext } from '../context/AuthContext'
 
 function timeAgo(iso) {
   if (!iso) return ''
@@ -37,6 +38,7 @@ function modelShort(model) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { hasRole } = useContext(AuthContext)
   const [stats, setStats]     = useState(null)
   const [loading, setLoading] = useState(true)
   const [quickId, setQuickId] = useState('')
@@ -195,7 +197,8 @@ export default function Dashboard() {
           <button
             className="btn btn-primary btn-lg"
             onClick={handleQuickGenerate}
-            disabled={!quickId.trim()}
+            disabled={!quickId.trim() || !hasRole('developer')}
+            title={!hasRole('developer') ? 'Developer account required to generate test plans' : ''}
           >
             ⚡ Generate Test Plan
           </button>
