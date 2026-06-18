@@ -41,7 +41,8 @@ export default function Generate() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const loadInterval = useRef(null)
+  const loadInterval  = useRef(null)
+  const abortCtrlRef  = useRef(null)
 
   // Auto-fetch if jira ID from query param
   useEffect(() => {
@@ -70,8 +71,18 @@ export default function Generate() {
     setFormats(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
   }
 
+  function cancelGenerate() {
+    abortCtrlRef.current?.abort()
+    clearInterval(loadInterval.current)
+    setGenerating(false)
+    setLoadStep(0)
+    showToast('Generation cancelled.', 'info')
+  }
+
   async function handleGenerate() {
     if (!issue) return
+    const ctrl = new AbortController()
+    abortCtrlRef.current = ctrl
     setGenerating(true)
     setGenError('')
     setLoadStep(0)
@@ -89,12 +100,13 @@ export default function Generate() {
         ai_suggestions:         aiSuggestions,
         detail_level:           detailLevel,
         test_plan_format:       formats,
-      })
+      }, { signal: ctrl.signal })
       clearInterval(loadInterval.current)
       showToast('Success! Redirecting to test plan...', 'success')
       setTimeout(() => navigate(`/plan/${r.data.data.id}`, { state: { plan: r.data.data } }), 1000)
     } catch(e) {
       clearInterval(loadInterval.current)
+      if (axios.isCancel(e)) return
       setGenError(e.response?.data?.error || 'Generation failed. Check your LLM API key in Settings.')
       showToast(e.response?.data?.error || 'Generation failed', 'error')
       setGenerating(false)
@@ -160,6 +172,16 @@ export default function Generate() {
             </div>
             <div style={{ marginTop: 8, height: 6, borderRadius: 4, background: 'var(--border)', width: '60%' }}
               className="skeleton" />
+          </div>
+
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center' }}>
+            <button
+              className="btn btn-outline"
+              onClick={cancelGenerate}
+              style={{ color: 'var(--red, #ef4444)', borderColor: 'var(--red, #ef4444)', padding: '8px 24px' }}
+            >
+              ✕ Cancel Generation
+            </button>
           </div>
         </div>
       </div>

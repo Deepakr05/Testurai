@@ -27,6 +27,10 @@ export default function TestGenerator() {
   const [actionLoading, setActionLoading] = useState(false)
   const [generateLoading, setGenerateLoading] = useState(null)
 
+  const genAbortRef       = useRef(null)
+  const batchCancelledRef = useRef(false)
+  const batchAbortRef     = useRef(null)
+
   // Selection
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [expandedScripts, setExpandedScripts] = useState(new Set())
@@ -61,11 +65,19 @@ export default function TestGenerator() {
   }, [paramTc, testCases])
 
   function handleGenerateScript(plan_id, tc_id) {
+    const ctrl = new AbortController()
+    genAbortRef.current = ctrl
     setGenerateLoading(tc_id)
-    axios.post(`/api/generate-script/${plan_id}/${tc_id}`, { provider: activeProvider })
+    axios.post(`/api/generate-script/${plan_id}/${tc_id}`, { provider: activeProvider }, { signal: ctrl.signal })
       .then(() => { fetchCases(); showToast('Script generated successfully!', 'success') })
-      .catch(e => showToast(e.response?.data?.error || 'Failed to generate script', 'error'))
+      .catch(e => { if (!axios.isCancel(e)) showToast(e.response?.data?.error || 'Failed to generate script', 'error') })
       .finally(() => setGenerateLoading(null))
+  }
+
+  function cancelGenerateScript() {
+    genAbortRef.current?.abort()
+    setGenerateLoading(null)
+    showToast('Script generation cancelled.', 'info')
   }
 
   function startEdit(tc) {
@@ -126,24 +138,39 @@ export default function TestGenerator() {
   const handleBatchGenerate = async () => {
     const toGenerate = testCases.filter(tc => selectedIds.has(`${tc.plan_id}-${tc.id}`))
     if (toGenerate.length === 0) return showToast('No tests selected.', 'error')
-    
+
+    batchCancelledRef.current = false
     setBatchGenStatus(`0/${toGenerate.length}`)
     let successCount = 0
     let failCount = 0
-    for(let i=0; i<toGenerate.length; i++) {
-        const tc = toGenerate[i]
-        try {
-            await axios.post(`/api/generate-script/${tc.plan_id}/${tc.id}`, { provider: activeProvider })
-            successCount++
-            setBatchGenStatus(`${i+1}/${toGenerate.length}`)
-        } catch(e) {
-            console.error(e)
-            failCount++
-        }
+
+    for (let i = 0; i < toGenerate.length; i++) {
+      if (batchCancelledRef.current) break
+      const tc = toGenerate[i]
+      const ctrl = new AbortController()
+      batchAbortRef.current = ctrl
+      try {
+        await axios.post(`/api/generate-script/${tc.plan_id}/${tc.id}`, { provider: activeProvider }, { signal: ctrl.signal })
+        successCount++
+        setBatchGenStatus(`${i + 1}/${toGenerate.length}`)
+      } catch (e) {
+        if (axios.isCancel(e)) break
+        failCount++
+      }
     }
+
     setBatchGenStatus(null)
     fetchCases()
-    showToast(`Batch generation complete. ${successCount} succeeded, ${failCount} failed.`, failCount > 0 ? 'error' : 'success')
+    if (batchCancelledRef.current) {
+      showToast(`Cancelled. ${successCount} script(s) generated before stopping.`, 'info')
+    } else {
+      showToast(`Batch complete. ${successCount} succeeded, ${failCount} failed.`, failCount > 0 ? 'error' : 'success')
+    }
+  }
+
+  function cancelBatchGenerate() {
+    batchCancelledRef.current = true
+    batchAbortRef.current?.abort()
   }
 
   const toggleAllExpanded = () => {
@@ -324,10 +351,19 @@ export default function TestGenerator() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {!readOnly && (
-            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={handleBatchGenerate} disabled={selectedIds.size === 0 || batchGenStatus !== null}>
-              {batchGenStatus !== null ? `⏳ Generating ${batchGenStatus}...` : '🤖 Generate Scripts'}
+          {!readOnly && batchGenStatus === null && (
+            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={handleBatchGenerate} disabled={selectedIds.size === 0}>
+              🤖 Generate Scripts
             </button>
+          )}
+          {!readOnly && batchGenStatus !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Generating {batchGenStatus}...</span>
+              <button className="btn btn-outline" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--red,#ef4444)', borderColor: 'var(--red,#ef4444)' }} onClick={cancelBatchGenerate}>
+                ✕ Stop
+              </button>
+            </div>
           )}
           <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={toggleAllExpanded} disabled={selectedIds.size === 0}>
              👁️ {(() => {
@@ -406,14 +442,23 @@ export default function TestGenerator() {
                       {tc.playwright_script && <span className="badge badge-blue">Ready</span>}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      {!readOnly && (
+                      {!readOnly && generateLoading === tc.id && (
+                        <button
+                          className="btn btn-outline"
+                          style={{ fontSize: 11, padding: '4px 10px', color: 'var(--red,#ef4444)', borderColor: 'var(--red,#ef4444)', display: 'flex', alignItems: 'center', gap: 5 }}
+                          onClick={cancelGenerateScript}
+                        >
+                          <span className="spinner" style={{ width: 11, height: 11, borderWidth: 2 }} /> Cancel
+                        </button>
+                      )}
+                      {!readOnly && generateLoading !== tc.id && (
                         <button
                           className="btn btn-primary"
                           style={{ fontSize: 11, padding: '4px 10px' }}
                           onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
-                          disabled={generateLoading === tc.id || actionLoading}
+                          disabled={generateLoading !== null || actionLoading}
                         >
-                          {generateLoading === tc.id ? '⏳ Generating...' : (tc.playwright_script ? '🔄 Regenerate' : '🤖 Generate')}
+                          {tc.playwright_script ? '🔄 Regenerate' : '🤖 Generate'}
                         </button>
                       )}
                       {tc.playwright_script && (

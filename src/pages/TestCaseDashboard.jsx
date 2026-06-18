@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useContext } from 'react'
+import { useState, useEffect, useMemo, useContext, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { AuthContext } from '../context/AuthContext'
@@ -31,6 +31,7 @@ export default function TestCaseDashboard() {
   const [cloneForm, setCloneForm] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [generateLoading, setGenerateLoading] = useState(null)
+  const genAbortRef = useRef(null)
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -42,14 +43,19 @@ export default function TestCaseDashboard() {
   }
 
   function handleGenerateScript(plan_id, tc_id) {
+    const ctrl = new AbortController()
+    genAbortRef.current = ctrl
     setGenerateLoading(tc_id)
-    axios.post(`/api/generate-script/${plan_id}/${tc_id}`, { provider: activeProvider })
-      .then(() => {
-        fetchCases()
-        showToast('Script generated successfully!', 'success')
-      })
-      .catch(e => showToast(e.response?.data?.error || 'Failed to generate script', 'error'))
+    axios.post(`/api/generate-script/${plan_id}/${tc_id}`, { provider: activeProvider }, { signal: ctrl.signal })
+      .then(() => { fetchCases(); showToast('Script generated successfully!', 'success') })
+      .catch(e => { if (!axios.isCancel(e)) showToast(e.response?.data?.error || 'Failed to generate script', 'error') })
       .finally(() => setGenerateLoading(null))
+  }
+
+  function cancelGenerateScript() {
+    genAbortRef.current?.abort()
+    setGenerateLoading(null)
+    showToast('Script generation cancelled.', 'info')
   }
 
   const fetchCases = () => {
@@ -368,14 +374,23 @@ export default function TestCaseDashboard() {
                         ➕ Clone
                       </button>
                     )}
-                    {!readOnly && (
+                    {!readOnly && generateLoading === tc.id && (
+                      <button
+                        className="btn btn-outline"
+                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--red,#ef4444)', borderColor: 'var(--red,#ef4444)', display: 'flex', alignItems: 'center', gap: 5 }}
+                        onClick={cancelGenerateScript}
+                      >
+                        <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} /> Cancel
+                      </button>
+                    )}
+                    {!readOnly && generateLoading !== tc.id && (
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: 11, padding: '4px 8px', color: 'var(--cyan)' }}
                         onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
-                        disabled={actionLoading || generateLoading === tc.id}
+                        disabled={actionLoading || generateLoading !== null}
                       >
-                        {generateLoading === tc.id ? '⏳ Gen...' : (tc.playwright_script ? '🔄 Regen' : '🤖 Gen')}
+                        {tc.playwright_script ? '🔄 Regen' : '🤖 Gen'}
                       </button>
                     )}
                     {tc.playwright_script && (
