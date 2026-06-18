@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import { AuthContext } from '../context/AuthContext'
 
 function timeAgo(iso) {
   if (!iso) return ''
@@ -28,6 +29,7 @@ const FILTERS = ['all','week','month','starred']
 
 export default function History() {
   const navigate = useNavigate()
+  const { hasRole } = useContext(AuthContext)
   const [params] = useSearchParams()
 
   const [records,   setRecords]   = useState([])
@@ -92,6 +94,18 @@ export default function History() {
   function showToast(msg, type = 'info') {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3000)
+  }
+
+  async function handleStar(e, id) {
+    e.stopPropagation()
+    try {
+      const r = await axios.patch(`/api/history/${id}/star`)
+      setRecords(prev => prev.map(rec =>
+        rec.id === id ? { ...rec, starred: r.data.data.starred } : rec
+      ))
+    } catch {
+      showToast('Could not update star', 'error')
+    }
   }
 
   return (
@@ -165,16 +179,17 @@ export default function History() {
                 <th>Test Cases</th>
                 <th>Date</th>
                 <th>Actions</th>
+                {hasRole('developer') && <th style={{ width: 36 }} />}
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px 0' }}>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px 0' }}>
                   <div className="spinner" style={{ margin: '0 auto' }} />
                 </td></tr>
               )}
               {!loading && records.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 0' }}>
+                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 0' }}>
                   No test plans found.
                 </td></tr>
               )}
@@ -210,6 +225,17 @@ export default function History() {
                       View →
                     </button>
                   </td>
+                  {hasRole('developer') && (
+                    <td>
+                      <button
+                        onClick={e => handleStar(e, r.id)}
+                        title={r.starred ? 'Unstar' : 'Star'}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px', opacity: r.starred ? 1 : 0.3 }}
+                      >
+                        ★
+                      </button>
+                    </td>
+                  )}
                 </tr>
                 ));
               })()}

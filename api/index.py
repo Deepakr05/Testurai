@@ -410,7 +410,7 @@ def stats():
 # ── Jira ──────────────────────────────────────────────────────────────────────
 
 @app.route("/api/jira/issue/<string:issue_id>", methods=["GET"])
-@require_auth("developer")
+@require_auth("normal")
 def jira_issue(issue_id: str):
     if not _valid_jira_id(issue_id):
         return err("Invalid Jira issue id. Expected format like ABC-123.")
@@ -825,7 +825,7 @@ def settings_persistence():
 
 
 @app.route("/api/settings", methods=["PUT"])
-@require_auth("admin")
+@require_auth("developer")
 def settings_put():
     try:
         incoming = request.get_json(force=True) or {}

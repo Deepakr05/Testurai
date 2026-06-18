@@ -132,7 +132,7 @@ export default function Dashboard() {
                         {modelShort(r.llm_model)}
                       </span>
                     </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{modelShort(r.llm_model)}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{r.llm_provider || '—'}</td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{timeAgo(r.generated_at)}</td>
                   </tr>
                 ))}

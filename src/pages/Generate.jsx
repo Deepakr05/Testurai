@@ -86,6 +86,7 @@ export default function Generate() {
         llm_provider:           activeProvider,
         include_sub_tasks:      subTasks,
         include_negative_cases: negCases,
+        ai_suggestions:         aiSuggestions,
         detail_level:           detailLevel,
         test_plan_format:       formats,
       })

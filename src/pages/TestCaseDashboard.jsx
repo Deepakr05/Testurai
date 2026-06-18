@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { AuthContext } from '../context/AuthContext'
+import { ProviderContext } from '../context/ProviderContext'
 
 function priorityBadge(p) {
   if (!p) return 'badge-gray'
@@ -13,6 +14,7 @@ function priorityBadge(p) {
 export default function TestCaseDashboard() {
   const navigate = useNavigate()
   const { hasRole } = useContext(AuthContext)
+  const { activeProvider } = useContext(ProviderContext)
   const readOnly = !hasRole('developer')
   const [testCases, setTestCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -41,7 +43,7 @@ export default function TestCaseDashboard() {
 
   function handleGenerateScript(plan_id, tc_id) {
     setGenerateLoading(tc_id)
-    axios.post(`/api/generate-script/${plan_id}/${tc_id}`)
+    axios.post(`/api/generate-script/${plan_id}/${tc_id}`, { provider: activeProvider })
       .then(() => {
         fetchCases()
         showToast('Script generated successfully!', 'success')
