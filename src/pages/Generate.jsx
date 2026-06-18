@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { ProviderContext } from '../context/ProviderContext'
 import { AuthContext } from '../context/AuthContext'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 const FORMATS = ['unit', 'integration', 'e2e', 'security']
 
@@ -24,6 +25,8 @@ export default function Generate() {
   const [issue,  setIssue]  = useState(null)
   const [issueLoading, setIssueLoading] = useState(false)
   const [issueError,   setIssueError]   = useState('')
+  const [existingPlanCount, setExistingPlanCount] = useState(0)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
 
   const [formats,        setFormats]        = useState(['unit','integration','e2e'])
@@ -55,10 +58,15 @@ export default function Generate() {
     setIssueLoading(true)
     setIssueError('')
     setIssue(null)
+    setExistingPlanCount(0)
     try {
       const r = await axios.get(`/api/jira/issue/${target}`)
       setIssue(r.data.data)
       showToast('Jira issue fetched!', 'success')
+      // Check if plans already exist for this Jira ID
+      const hist = await axios.get('/api/history', { params: { q: target, filter: 'all' } })
+      const matches = (hist.data.data || []).filter(p => p.jira_id === target)
+      setExistingPlanCount(matches.length)
     } catch(e) {
       setIssueError(e.response?.data?.error || 'Could not fetch issue. Check your Jira settings.')
       showToast(e.response?.data?.error || 'Fetch failed', 'error')
@@ -110,6 +118,14 @@ export default function Generate() {
       setGenError(e.response?.data?.error || 'Generation failed. Check your LLM API key in Settings.')
       showToast(e.response?.data?.error || 'Generation failed', 'error')
       setGenerating(false)
+    }
+  }
+
+  function handleGenerateClick() {
+    if (existingPlanCount > 0) {
+      setConfirmOpen(true)
+    } else {
+      handleGenerate()
     }
   }
 
@@ -241,7 +257,14 @@ export default function Generate() {
             <div className="card slide-in">
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>Jira Issue Preview</div>
-                <span className="badge badge-cyan">{issue.id}</span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {existingPlanCount > 0 && (
+                    <span className="badge badge-orange" title="Existing test plans found for this Jira ID">
+                      ⚠ {existingPlanCount} existing plan{existingPlanCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <span className="badge badge-cyan">{issue.id}</span>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
@@ -390,7 +413,7 @@ export default function Generate() {
 
           <button
             className="btn btn-primary btn-lg"
-            onClick={handleGenerate}
+            onClick={handleGenerateClick}
             disabled={!issue || generating || readOnly}
             title={readOnly ? 'Developer account required to generate test plans' : ''}
             style={{ width: '100%', padding: '12px 16px', fontSize: 14 }}
@@ -405,6 +428,15 @@ export default function Generate() {
         </div>
       </div>
       
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Test Plan Already Exists"
+        message={`${existingPlanCount} test plan${existingPlanCount > 1 ? 's have' : ' has'} already been generated for ${issue?.id}. Do you want to generate another one?`}
+        confirmLabel="Generate Anyway"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => { setConfirmOpen(false); handleGenerate() }}
+      />
+
       {toast && (
         <div className={`toast toast-${toast.type}`}>
           {toast.type === 'success' ? '✅' : '❌'} {toast.msg}

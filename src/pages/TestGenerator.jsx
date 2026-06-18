@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { ProviderContext } from '../context/ProviderContext'
 import { AuthContext } from '../context/AuthContext'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 export default function TestGenerator() {
   const navigate = useNavigate()
@@ -30,6 +31,10 @@ export default function TestGenerator() {
   const genAbortRef       = useRef(null)
   const batchCancelledRef = useRef(false)
   const batchAbortRef     = useRef(null)
+
+  const [confirmScript, setConfirmScript]   = useState(null)
+  const [confirmBatch,  setConfirmBatch]    = useState(false)
+  const [batchWithScripts, setBatchWithScripts] = useState(0)
 
   // Selection
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -171,6 +176,26 @@ export default function TestGenerator() {
   function cancelBatchGenerate() {
     batchCancelledRef.current = true
     batchAbortRef.current?.abort()
+  }
+
+  function requestGenerateScript(plan_id, tc_id, hasExistingScript) {
+    if (hasExistingScript) {
+      setConfirmScript({ plan_id, tc_id })
+    } else {
+      handleGenerateScript(plan_id, tc_id)
+    }
+  }
+
+  function requestBatchGenerate() {
+    const toGenerate = testCases.filter(tc => selectedIds.has(`${tc.plan_id}-${tc.id}`))
+    if (toGenerate.length === 0) return showToast('No tests selected.', 'error')
+    const withScripts = toGenerate.filter(tc => !!tc.playwright_script).length
+    if (withScripts > 0) {
+      setBatchWithScripts(withScripts)
+      setConfirmBatch(true)
+    } else {
+      handleBatchGenerate()
+    }
   }
 
   const toggleAllExpanded = () => {
@@ -352,7 +377,7 @@ export default function TestGenerator() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {!readOnly && batchGenStatus === null && (
-            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={handleBatchGenerate} disabled={selectedIds.size === 0}>
+            <button className="btn btn-outline" style={{ padding: '4px 8px', fontSize: 12 }} onClick={requestBatchGenerate} disabled={selectedIds.size === 0}>
               🤖 Generate Scripts
             </button>
           )}
@@ -455,7 +480,7 @@ export default function TestGenerator() {
                         <button
                           className="btn btn-primary"
                           style={{ fontSize: 11, padding: '4px 10px' }}
-                          onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
+                          onClick={() => requestGenerateScript(tc.plan_id, tc.id, !!tc.playwright_script)}
                           disabled={generateLoading !== null || actionLoading}
                         >
                           {tc.playwright_script ? '🔄 Regenerate' : '🤖 Generate'}
@@ -526,6 +551,24 @@ export default function TestGenerator() {
           })})()}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmScript}
+        title="Script Already Exists"
+        message="A Playwright script has already been generated for this test case. Regenerating will overwrite the existing script."
+        confirmLabel="Regenerate"
+        onCancel={() => setConfirmScript(null)}
+        onConfirm={() => { const p = confirmScript; setConfirmScript(null); handleGenerateScript(p.plan_id, p.tc_id) }}
+      />
+
+      <ConfirmDialog
+        open={confirmBatch}
+        title="Some Scripts Already Exist"
+        message={`${batchWithScripts} of the selected test case${batchWithScripts > 1 ? 's have' : ' has'} an existing Playwright script. Generating will overwrite ${batchWithScripts > 1 ? 'them' : 'it'}.`}
+        confirmLabel="Generate All"
+        onCancel={() => setConfirmBatch(false)}
+        onConfirm={() => { setConfirmBatch(false); handleBatchGenerate() }}
+      />
 
       {toast && (
         <div className={`toast toast-${toast.type}`}>

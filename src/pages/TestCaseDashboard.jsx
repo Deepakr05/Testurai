@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { AuthContext } from '../context/AuthContext'
 import { ProviderContext } from '../context/ProviderContext'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 function priorityBadge(p) {
   if (!p) return 'badge-gray'
@@ -32,6 +33,7 @@ export default function TestCaseDashboard() {
   const [actionLoading, setActionLoading] = useState(false)
   const [generateLoading, setGenerateLoading] = useState(null)
   const genAbortRef = useRef(null)
+  const [confirmScript, setConfirmScript] = useState(null)
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -56,6 +58,14 @@ export default function TestCaseDashboard() {
     genAbortRef.current?.abort()
     setGenerateLoading(null)
     showToast('Script generation cancelled.', 'info')
+  }
+
+  function requestGenerateScript(plan_id, tc_id, hasExistingScript) {
+    if (hasExistingScript) {
+      setConfirmScript({ plan_id, tc_id })
+    } else {
+      handleGenerateScript(plan_id, tc_id)
+    }
   }
 
   const fetchCases = () => {
@@ -387,7 +397,7 @@ export default function TestCaseDashboard() {
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: 11, padding: '4px 8px', color: 'var(--cyan)' }}
-                        onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
+                        onClick={() => requestGenerateScript(tc.plan_id, tc.id, !!tc.playwright_script)}
                         disabled={actionLoading || generateLoading !== null}
                       >
                         {tc.playwright_script ? '🔄 Regen' : '🤖 Gen'}
@@ -456,6 +466,15 @@ export default function TestCaseDashboard() {
         </div>
       )}
       
+      <ConfirmDialog
+        open={!!confirmScript}
+        title="Script Already Exists"
+        message="A Playwright script has already been generated for this test case. Regenerating will overwrite the existing script."
+        confirmLabel="Regenerate"
+        onCancel={() => setConfirmScript(null)}
+        onConfirm={() => { const p = confirmScript; setConfirmScript(null); handleGenerateScript(p.plan_id, p.tc_id) }}
+      />
+
       {toast && (
         <div className={`toast toast-${toast.type}`}>
           {toast.type === 'success' ? '✅' : '❌'} {toast.msg}
