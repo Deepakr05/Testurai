@@ -170,8 +170,6 @@ export default function Generate() {
             <div className="progress-bar-wrap">
               <div className="progress-bar-fill" style={{ width: `${((loadStep + 1) / LOAD_STEPS.length) * 100}%` }} />
             </div>
-            <div style={{ marginTop: 8, height: 6, borderRadius: 4, background: 'var(--border)', width: '60%' }}
-              className="skeleton" />
           </div>
 
           <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center' }}>
