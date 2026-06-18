@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { AuthContext } from '../context/AuthContext'
 
 function priorityBadge(p) {
   if (!p) return 'badge-gray'
@@ -11,6 +12,8 @@ function priorityBadge(p) {
 
 export default function TestCaseDashboard() {
   const navigate = useNavigate()
+  const { hasRole } = useContext(AuthContext)
+  const readOnly = !hasRole('developer')
   const [testCases, setTestCases] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -183,6 +186,12 @@ export default function TestCaseDashboard() {
         </div>
       </div>
 
+      {readOnly && (
+        <div className="card" style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--orange-bg, rgba(251,146,60,0.1))', border: '1px solid var(--orange, #fb923c)', color: 'var(--orange, #fb923c)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>👁</span> Read-only mode — editing, cloning, deleting, and generating scripts requires a developer account.
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -314,10 +323,12 @@ export default function TestCaseDashboard() {
                   </div>
                   
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                    <button className="btn btn-outline" onClick={() => setEditingId(null)} disabled={actionLoading}>Cancel</button>
-                    <button className="btn btn-primary" onClick={() => handleSave(tc.plan_id, tc.id)} disabled={actionLoading}>
-                      {actionLoading ? 'Saving...' : 'Save Changes'}
-                    </button>
+                    <button className="btn btn-outline" onClick={() => setEditingId(null)}>Cancel</button>
+                    {!readOnly && (
+                      <button className="btn btn-primary" onClick={() => handleSave(tc.plan_id, tc.id)} disabled={actionLoading}>
+                        {actionLoading ? 'Saving...' : 'Save Changes'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )
@@ -335,49 +346,57 @@ export default function TestCaseDashboard() {
                     <span className={`badge ${tc.type?.toLowerCase()==='negative' ? 'badge-orange' : 'badge-blue'}`}>{tc.type}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button 
-                      className="btn btn-ghost" 
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                      onClick={() => startEdit(tc)}
-                      disabled={actionLoading}
-                    >
-                      ✏️ Edit
-                    </button>
-                    <button 
-                      className="btn btn-ghost" 
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                      onClick={() => startClone(tc)}
-                      disabled={actionLoading}
-                    >
-                      ➕ Clone
-                    </button>
-                    <button 
-                      className="btn btn-ghost" 
-                      style={{ fontSize: 11, padding: '4px 8px', color: 'var(--cyan)' }}
-                      onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
-                      disabled={actionLoading || generateLoading === tc.id}
-                    >
-                      {generateLoading === tc.id ? '⏳ Gen...' : (tc.playwright_script ? '🔄 Regen' : '🤖 Gen')}
-                    </button>
+                    {!readOnly && (
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px' }}
+                        onClick={() => startEdit(tc)}
+                        disabled={actionLoading}
+                      >
+                        ✏️ Edit
+                      </button>
+                    )}
+                    {!readOnly && (
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px' }}
+                        onClick={() => startClone(tc)}
+                        disabled={actionLoading}
+                      >
+                        ➕ Clone
+                      </button>
+                    )}
+                    {!readOnly && (
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--cyan)' }}
+                        onClick={() => handleGenerateScript(tc.plan_id, tc.id)}
+                        disabled={actionLoading || generateLoading === tc.id}
+                      >
+                        {generateLoading === tc.id ? '⏳ Gen...' : (tc.playwright_script ? '🔄 Regen' : '🤖 Gen')}
+                      </button>
+                    )}
                     {tc.playwright_script && (
-                      <button 
-                        className="btn btn-ghost" 
+                      <button
+                        className="btn btn-ghost"
                         style={{ fontSize: 11, padding: '4px 8px', color: 'var(--cyan)' }}
                         onClick={() => navigate(`/test-generator?tc=${tc.id}`)}
                       >
                         👁️ View Script
                       </button>
                     )}
-                    <button 
-                      className="btn btn-ghost" 
-                      style={{ fontSize: 11, padding: '4px 8px', color: 'var(--red)' }}
-                      onClick={() => handleDelete(tc.plan_id, tc.id)}
-                      disabled={actionLoading}
-                    >
-                      🗑️
-                    </button>
-                    <button 
-                      className="btn btn-ghost" 
+                    {!readOnly && (
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--red)' }}
+                        onClick={() => handleDelete(tc.plan_id, tc.id)}
+                        disabled={actionLoading}
+                      >
+                        🗑️
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-ghost"
                       style={{ fontSize: 11, padding: '4px 8px' }}
                       onClick={() => navigate(`/plan/${tc.plan_id}`)}
                     >
