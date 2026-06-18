@@ -43,6 +43,7 @@ export default function UserManagement() {
     }
   }
 
+  useEffect(() => { document.title = 'User Management | TestMaster' }, [])
   useEffect(() => { fetchUsers() }, [])
 
   async function handleRoleChange(userId, role) {

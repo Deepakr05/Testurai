@@ -47,6 +47,8 @@ export default function Generate() {
   const loadInterval  = useRef(null)
   const abortCtrlRef  = useRef(null)
 
+  useEffect(() => { document.title = 'Generate Test Plan | TestMaster' }, [])
+
   // Auto-fetch if jira ID from query param
   useEffect(() => {
     if (params.get('jira')) fetchIssue(params.get('jira'))

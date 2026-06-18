@@ -41,6 +41,7 @@ Admins are the only ones who can create or delete user accounts. There is no pub
 | Database | Supabase (PostgreSQL via PostgREST) |
 | LLM | OpenAI / Anthropic / Google / Groq / Local |
 | Export | python-docx, ReportLab |
+| Bundler | Vite 8 + rolldown (manual chunk splitting per vendor + per page) |
 
 ---
 
@@ -49,13 +50,20 @@ Admins are the only ones who can create or delete user accounts. There is no pub
 ```
 ├── api/
 │   └── index.py          # Flask API (all endpoints)
+├── public/
+│   ├── favicon.svg       # App icon
+│   ├── manifest.json     # PWA web app manifest
+│   ├── robots.txt        # Crawl rules (only /login is public)
+│   └── sitemap.xml       # Single-entry sitemap for the login page
 ├── src/
 │   ├── context/
 │   │   ├── AuthContext.jsx       # JWT auth state + axios header injection
 │   │   └── ProviderContext.jsx   # Global LLM provider selector
 │   ├── components/
-│   │   ├── Sidebar.jsx           # Nav, LLM picker, user info, logout
-│   │   └── ProtectedRoute.jsx    # Auth + role guard
+│   │   ├── Sidebar.jsx           # Nav (<nav>), LLM picker
+│   │   ├── TopBar.jsx            # User info, theme toggle (<header>)
+│   │   ├── ProtectedRoute.jsx    # Auth + role guard
+│   │   └── ConfirmDialog.jsx     # Reusable overwrite-confirmation modal
 │   └── pages/
 │       ├── Login.jsx             # Email/password login
 │       ├── Dashboard.jsx
@@ -72,10 +80,59 @@ Admins are the only ones who can create or delete user accounts. There is no pub
 │   ├── llm_client.py
 │   ├── test_plan_generator.py
 │   └── export_engine.py
+├── index.html            # Full OG/Twitter meta, canonical, preconnect
+├── vite.config.js        # Vendor + per-page chunk splitting
 ├── vercel.json
 ├── requirements.txt
 └── .env.example
 ```
+
+---
+
+## SEO & Performance
+
+### Meta & Discoverability
+- **Open Graph** (`og:title`, `og:description`, `og:image`, `og:type`, `og:url`) — rich previews when shared on Slack, LinkedIn, Twitter, etc.
+- **Twitter Card** (`summary_large_image`) — large image card on Twitter/X
+- **Canonical URL** — prevents duplicate-content penalties if hosted under multiple domains
+- **`robots.txt`** — only `/login` is indexable; all authenticated routes are `Disallow`ed
+- **`sitemap.xml`** — single public entry pointing crawlers to the login page
+- **`manifest.json`** — PWA manifest enabling "Add to Home Screen" on mobile/desktop with correct theme colour (`#00e5cc`)
+- **`theme-color`** meta — tints the browser chrome on mobile
+- **`dns-prefetch`** on OpenAI / Anthropic / Google LLM API origins — reduces DNS lookup latency on first API call
+
+### Per-page Document Titles
+Every route sets `document.title` via `useEffect`, so the browser tab and history entries are always descriptive:
+
+| Route | Title |
+|-------|-------|
+| `/login` | Login \| TestMaster |
+| `/dashboard` | Dashboard \| TestMaster |
+| `/generate` | Generate Test Plan \| TestMaster |
+| `/history` | History \| TestMaster |
+| `/plan/:id` | `{JIRA-ID}` — Test Plan \| TestMaster *(dynamic)* |
+| `/test-cases` | Test Cases \| TestMaster |
+| `/test-generator` | Test Scripts \| TestMaster |
+| `/settings` | Settings \| TestMaster |
+| `/users` | User Management \| TestMaster |
+
+### Performance (Core Web Vitals)
+- **Route-level code splitting** — every page is a separate JS chunk loaded on demand via `React.lazy` + `Suspense`. The initial bundle only downloads what the current route needs.
+- **Vendor chunk splitting** (Vite `manualChunks`):
+
+  | Chunk | Libraries |
+  |-------|-----------|
+  | `vendor-react` | react, react-dom, react-router-dom |
+  | `vendor-markdown` | react-markdown, remark-gfm |
+  | `vendor-http` | axios |
+
+  Each vendor chunk is cached independently — a code change to your pages won't bust the React cache.
+
+### Semantic HTML & Accessibility
+- Sidebar navigation wrapped in `<nav aria-label="Main navigation">` with `aria-current="page"` on the active item
+- Top bar upgraded from `<div>` to `<header role="banner">`
+- Nav icons marked `aria-hidden="true"` so screen readers skip decorative emojis
+- `<main id="main-content">` on the page content area
 
 ---
 
@@ -222,7 +279,7 @@ The project is pre-configured for Vercel via `vercel.json`. Push to `main` to au
 | Method | Endpoint | Role | Description |
 |--------|----------|------|-------------|
 | GET | `/api/stats` | normal | Dashboard stats |
-| GET | `/api/jira/issue/:id` | developer | Fetch Jira issue |
+| GET | `/api/jira/issue/:id` | normal | Fetch Jira issue |
 | POST | `/api/generate` | developer | Generate test plan |
 | GET | `/api/history` | normal | List plans |
 | GET | `/api/history/:id` | normal | Plan detail |

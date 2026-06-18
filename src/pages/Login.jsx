@@ -6,6 +6,8 @@ export default function Login() {
   const navigate = useNavigate()
   const { login, user, loading: authLoading } = useContext(AuthContext)
 
+  useEffect(() => { document.title = 'Login | TestMaster' }, [])
+
   useEffect(() => {
     if (!authLoading && user) navigate('/dashboard', { replace: true })
   }, [user, authLoading, navigate])

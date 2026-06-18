@@ -91,18 +91,19 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <div className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="Main navigation">
         {visibleNav.map(item => (
           <button
             key={item.path}
             className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
             onClick={() => navigate(item.path)}
+            aria-current={location.pathname === item.path ? 'page' : undefined}
           >
-            <span className="nav-icon">{item.icon}</span>
+            <span className="nav-icon" aria-hidden="true">{item.icon}</span>
             {item.label}
           </button>
         ))}
-      </div>
+      </nav>
 
       {/* LLM Provider selector — visible to developer+ */}
       {hasRole('developer') && (

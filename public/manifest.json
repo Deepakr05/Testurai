@@ -1,0 +1,19 @@
+{
+  "name": "TestMaster — AI Test Plan Generator",
+  "short_name": "TestMaster",
+  "description": "Generate structured test plans from Jira issues using GPT-4o, Claude, or Gemini",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#00e5cc",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "developer-tools"],
+  "lang": "en"
+}
