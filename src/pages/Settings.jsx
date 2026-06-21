@@ -24,11 +24,12 @@ export default function Settings() {
   const [toast, setToast]       = useState(null)
   const [persistence, setPersistence] = useState(null)
 
-  const [templates, setTemplates]           = useState({ test_plan_prompt: '', playwright_prompt: '' })
-  const [defaults, setDefaults]             = useState({ test_plan_prompt: '', playwright_prompt: '' })
-  const [isCustom, setIsCustom]             = useState({ test_plan_prompt: false, playwright_prompt: false })
+  const [templates, setTemplates]             = useState({ test_plan_prompt: '', playwright_prompt: '' })
+  const [defaults, setDefaults]               = useState({ test_plan_prompt: '', playwright_prompt: '' })
+  const [isCustom, setIsCustom]               = useState({ test_plan_prompt: false, playwright_prompt: false })
   const [templatesSaving, setTemplatesSaving] = useState(false)
   const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [templateSubTab, setTemplateSubTab]   = useState('test_plan')
 
   useEffect(() => { document.title = 'Settings | Testurai' }, [])
 
@@ -389,6 +390,7 @@ export default function Settings() {
           {/* Templates Tab */}
           {tab === 'templates' && (
             <div className="slide-in">
+              {/* Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>Prompt Templates</div>
@@ -405,91 +407,135 @@ export default function Settings() {
                 )}
               </div>
 
+              {/* Sub-tab pills */}
+              <div style={{
+                display: 'flex', gap: 4, marginBottom: 16,
+                background: 'var(--surface-2)', borderRadius: 'var(--radius)', padding: 4,
+                width: 'fit-content',
+              }}>
+                {[
+                  { id: 'test_plan',   label: '📋 Test Plan',   key: 'test_plan_prompt' },
+                  { id: 'playwright',  label: '🤖 Playwright',  key: 'playwright_prompt' },
+                ].map(st => (
+                  <button
+                    key={st.id}
+                    onClick={() => setTemplateSubTab(st.id)}
+                    style={{
+                      padding: '6px 16px', borderRadius: 'var(--radius-sm)', fontSize: 13,
+                      fontWeight: templateSubTab === st.id ? 600 : 400, border: 'none', cursor: 'pointer',
+                      background: templateSubTab === st.id ? 'var(--surface)' : 'transparent',
+                      color: templateSubTab === st.id ? 'var(--cyan)' : 'var(--text-muted)',
+                      boxShadow: templateSubTab === st.id ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+                      transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    {st.label}
+                    {isCustom[st.key] && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: 'var(--cyan)', display: 'inline-block',
+                      }} />
+                    )}
+                  </button>
+                ))}
+              </div>
+
               {templatesLoading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
                   <div className="spinner" style={{ width: 28, height: 28 }} />
                 </div>
               ) : (
                 <>
-                  {/* Test Plan Template */}
-                  <div className="card" style={{ marginBottom: 20 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>Test Plan System Prompt</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                          Sent to the LLM when generating a test plan. Defines the 13-section structure the AI must follow.
+                  {/* Test Plan sub-tab */}
+                  {templateSubTab === 'test_plan' && (
+                    <div className="card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>Test Plan System Prompt</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                            Sent to the LLM when generating a test plan. Defines the section structure the AI must follow.
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
+                          <span className={`badge ${isCustom.test_plan_prompt ? 'badge-cyan' : 'badge-gray'}`}>
+                            {isCustom.test_plan_prompt ? 'Custom' : 'Default'}
+                          </span>
+                          {isCustom.test_plan_prompt && isAdmin && (
+                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                              onClick={() => handleResetTemplate('test_plan_prompt')}>
+                              Reset to Default
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
-                        <span className={`badge ${isCustom.test_plan_prompt ? 'badge-cyan' : 'badge-gray'}`}>
-                          {isCustom.test_plan_prompt ? 'Custom' : 'Default'}
-                        </span>
-                        {isCustom.test_plan_prompt && isAdmin && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-                            onClick={() => handleResetTemplate('test_plan_prompt')}>
-                            Reset to Default
-                          </button>
-                        )}
+                      <textarea
+                        value={templates.test_plan_prompt}
+                        onChange={e => {
+                          setTemplates(prev => ({ ...prev, test_plan_prompt: e.target.value }))
+                          setIsCustom(prev => ({ ...prev, test_plan_prompt: e.target.value !== defaults.test_plan_prompt }))
+                        }}
+                        readOnly={!isAdmin}
+                        style={{
+                          width: '100%', boxSizing: 'border-box',
+                          minHeight: '65vh', height: 'auto',
+                          background: 'var(--surface-2)', border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm)', color: 'var(--text)',
+                          fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7,
+                          padding: '14px 16px', resize: 'vertical',
+                          opacity: isAdmin ? 1 : 0.7,
+                        }}
+                      />
+                      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                        {templates.test_plan_prompt.split('\n').length} lines · {templates.test_plan_prompt.length} characters
                       </div>
                     </div>
-                    <textarea
-                      value={templates.test_plan_prompt}
-                      onChange={e => {
-                        setTemplates(prev => ({ ...prev, test_plan_prompt: e.target.value }))
-                        setIsCustom(prev => ({ ...prev, test_plan_prompt: e.target.value !== defaults.test_plan_prompt }))
-                      }}
-                      readOnly={!isAdmin}
-                      rows={24}
-                      style={{
-                        width: '100%', boxSizing: 'border-box',
-                        background: 'var(--surface-2)', border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)', color: 'var(--text)',
-                        fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6,
-                        padding: '12px 14px', resize: 'vertical',
-                        opacity: isAdmin ? 1 : 0.7,
-                      }}
-                    />
-                  </div>
+                  )}
 
-                  {/* Playwright Template */}
-                  <div className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>Playwright Script System Prompt</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                          Used when generating Playwright TypeScript scripts from individual test cases.
+                  {/* Playwright sub-tab */}
+                  {templateSubTab === 'playwright' && (
+                    <div className="card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>Playwright Script System Prompt</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                            Used when generating Playwright TypeScript scripts from individual test cases. You can specify
+                            base fixtures, custom helpers, or framework constraints here.
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
+                          <span className={`badge ${isCustom.playwright_prompt ? 'badge-cyan' : 'badge-gray'}`}>
+                            {isCustom.playwright_prompt ? 'Custom' : 'Default'}
+                          </span>
+                          {isCustom.playwright_prompt && isAdmin && (
+                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                              onClick={() => handleResetTemplate('playwright_prompt')}>
+                              Reset to Default
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
-                        <span className={`badge ${isCustom.playwright_prompt ? 'badge-cyan' : 'badge-gray'}`}>
-                          {isCustom.playwright_prompt ? 'Custom' : 'Default'}
-                        </span>
-                        {isCustom.playwright_prompt && isAdmin && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-                            onClick={() => handleResetTemplate('playwright_prompt')}>
-                            Reset to Default
-                          </button>
-                        )}
+                      <textarea
+                        value={templates.playwright_prompt}
+                        onChange={e => {
+                          setTemplates(prev => ({ ...prev, playwright_prompt: e.target.value }))
+                          setIsCustom(prev => ({ ...prev, playwright_prompt: e.target.value !== defaults.playwright_prompt }))
+                        }}
+                        readOnly={!isAdmin}
+                        style={{
+                          width: '100%', boxSizing: 'border-box',
+                          minHeight: '65vh', height: 'auto',
+                          background: 'var(--surface-2)', border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm)', color: 'var(--text)',
+                          fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7,
+                          padding: '14px 16px', resize: 'vertical',
+                          opacity: isAdmin ? 1 : 0.7,
+                        }}
+                      />
+                      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                        {templates.playwright_prompt.split('\n').length} lines · {templates.playwright_prompt.length} characters
                       </div>
                     </div>
-                    <textarea
-                      value={templates.playwright_prompt}
-                      onChange={e => {
-                        setTemplates(prev => ({ ...prev, playwright_prompt: e.target.value }))
-                        setIsCustom(prev => ({ ...prev, playwright_prompt: e.target.value !== defaults.playwright_prompt }))
-                      }}
-                      readOnly={!isAdmin}
-                      rows={6}
-                      style={{
-                        width: '100%', boxSizing: 'border-box',
-                        background: 'var(--surface-2)', border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)', color: 'var(--text)',
-                        fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6,
-                        padding: '12px 14px', resize: 'vertical',
-                        opacity: isAdmin ? 1 : 0.7,
-                      }}
-                    />
-                  </div>
+                  )}
                 </>
               )}
             </div>
