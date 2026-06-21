@@ -71,10 +71,14 @@ export default function Generate() {
       const r = await axios.get(`/api/jira/issue/${target}`)
       setIssue(r.data.data)
       showToast('Jira issue fetched!', 'success')
-      // Check if plans already exist for this Jira ID
-      const hist = await axios.get('/api/history', { params: { q: target, filter: 'all' } })
-      const matches = (hist.data.data || []).filter(p => p.jira_id === target)
-      setExistingPlanCount(matches.length)
+      // Check if plans already exist for this Jira ID (runs while issueLoading is still true)
+      try {
+        const hist = await axios.get('/api/history', { params: { q: target, filter: 'all' } })
+        const matches = (hist.data.data || []).filter(p => p.jira_id?.toUpperCase() === target.toUpperCase())
+        setExistingPlanCount(matches.length)
+      } catch {
+        setExistingPlanCount(0)
+      }
     } catch(e) {
       setIssueError(e.response?.data?.error || 'Could not fetch issue. Check your Jira settings.')
       showToast(e.response?.data?.error || 'Fetch failed', 'error')
@@ -529,7 +533,7 @@ export default function Generate() {
           <button
             className="btn btn-primary btn-lg"
             onClick={handleGenerateClick}
-            disabled={!issue || generating || readOnly}
+            disabled={!issue || issueLoading || generating || readOnly}
             title={readOnly ? 'Developer account required to generate test plans' : ''}
             style={{ width: '100%', padding: '12px 16px', fontSize: 14 }}
           >
