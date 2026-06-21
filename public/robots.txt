@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /login
+Disallow: /dashboard
+Disallow: /generate
+Disallow: /history
+Disallow: /plan/
+Disallow: /test-cases
+Disallow: /test-generator
+Disallow: /settings
+Disallow: /users
+
+Sitemap: https://testurai.vercel.app/sitemap.xml

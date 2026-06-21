@@ -30,7 +30,7 @@ export default function TopBar() {
   const displayName = user.full_name || user.email
 
   return (
-    <div className="top-bar">
+    <header className="top-bar" role="banner">
       <div className="top-bar-user">
         <button
           className="theme-toggle-btn"
@@ -59,6 +59,6 @@ export default function TopBar() {
           Sign out
         </button>
       </div>
-    </div>
+    </header>
   )
 }

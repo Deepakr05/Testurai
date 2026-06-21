@@ -30,6 +30,14 @@ export default function ViewPlan() {
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
+    if (plan?.jira_id) {
+      document.title = `${plan.jira_id} — Test Plan | Testurai`
+    } else {
+      document.title = 'Test Plan | Testurai'
+    }
+  }, [plan?.jira_id])
+
+  useEffect(() => {
     if (plan && plan.id === id) return; // Already have it from state
     axios.get(`/api/history/${id}`)
       .then(r => { setPlan(r.data.data); setLoading(false) })

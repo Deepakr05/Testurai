@@ -1,4 +1,4 @@
-# 📜 gemini.md — TestMaster Project Constitution
+# 📜 gemini.md — Testurai Project Constitution
 > **This file is LAW. All schemas, rules, and architecture decisions live here.**
 > Last Updated: 2026-04-04 (Rev 2 — Tech stack finalized)
 
@@ -6,7 +6,7 @@
 
 ## 🎯 Project Identity
 
-- **Project Name:** TestMaster
+- **Project Name:** Testurai
 - **Version:** V1.0
 - **Mission:** Accept a Jira Issue ID → fetch feature details via Jira REST API → generate a structured Test Plan using an LLM → export as `.docx` or `.pdf` — all within a local web app.
 

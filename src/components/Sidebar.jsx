@@ -86,23 +86,24 @@ export default function Sidebar() {
       <div className="sidebar-brand">
         <div className="brand-icon">✨</div>
         <div>
-          <span className="brand-name">TestMaster</span>
+          <span className="brand-name">Testurai</span>
           <div className="brand-tagline">Test Orchestrator</div>
         </div>
       </div>
 
-      <div className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="Main navigation">
         {visibleNav.map(item => (
           <button
             key={item.path}
             className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
             onClick={() => navigate(item.path)}
+            aria-current={location.pathname === item.path ? 'page' : undefined}
           >
-            <span className="nav-icon">{item.icon}</span>
+            <span className="nav-icon" aria-hidden="true">{item.icon}</span>
             {item.label}
           </button>
         ))}
-      </div>
+      </nav>
 
       {/* LLM Provider selector — visible to developer+ */}
       {hasRole('developer') && (
@@ -162,7 +163,7 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <div style={{ padding: '8px 16px' }}>
-          <div className="sidebar-version">TestMaster v1.0</div>
+          <div className="sidebar-version">Testurai v1.0</div>
         </div>
       </div>
     </div>

@@ -14,7 +14,7 @@ from tools.storage_manager import load_settings, save_test_plan, next_id
 
 # ─── System Prompt (Template Contract) ───────────────────────────────────────
 
-SYSTEM_PROMPT = """You are TestMaster, an expert QA engineer and test planner.
+SYSTEM_PROMPT = """You are Testurai, an expert QA engineer and test planner.
 
 Your task is to generate a comprehensive test plan in STRICT structured Markdown format.
 

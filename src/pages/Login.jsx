@@ -6,6 +6,8 @@ export default function Login() {
   const navigate = useNavigate()
   const { login, user, loading: authLoading } = useContext(AuthContext)
 
+  useEffect(() => { document.title = 'Login | Testurai' }, [])
+
   useEffect(() => {
     if (!authLoading && user) navigate('/dashboard', { replace: true })
   }, [user, authLoading, navigate])
@@ -41,7 +43,7 @@ export default function Login() {
       <div className="card fade-in" style={{ width: 400, padding: 40 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ fontSize: 44, marginBottom: 12 }}>✨</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>TestMaster</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Testurai</h1>
           <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Sign in to continue</div>
         </div>
 

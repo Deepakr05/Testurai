@@ -20,6 +20,8 @@ export default function Settings() {
   const [toast, setToast]       = useState(null)
   const [persistence, setPersistence] = useState(null)
 
+  useEffect(() => { document.title = 'Settings | Testurai' }, [])
+
   useEffect(() => {
     axios.get('/api/settings')
       .then(r => {
