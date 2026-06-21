@@ -202,7 +202,7 @@ try:
     )
     from tools.jira_client import fetch_issue, test_connection as jira_test_connection
     from tools.llm_client import test_connection as llm_test_connection
-    from tools.test_plan_generator import generate_test_plan
+    from tools.test_plan_generator import generate_test_plan, parse_test_cases
     from tools.export_engine import to_docx, to_pdf
 
 except Exception:
@@ -442,7 +442,7 @@ def generate():
         if not _valid_jira_id(jira_issue_id):
             return err("Invalid Jira issue id. Expected format like ABC-123.")
         body["jira_issue_id"] = jira_issue_id.upper()
-        record = generate_test_plan(body)
+        record = generate_test_plan(body, save=False)
         return ok(record)
     except ValueError as e:
         return err(str(e), 400)
@@ -450,6 +450,64 @@ def generate():
         return err(str(e), 502)
     except Exception as e:
         return err(f"Unexpected error: {e}", 500)
+
+
+@app.route("/api/history", methods=["POST"])
+@require_auth("developer")
+def history_save():
+    """Save a generated plan to the database after user review."""
+    try:
+        from tools.storage_manager import save_test_plan
+        body = request.get_json(force=True) or {}
+        if not body.get("id"):
+            return err("Plan id is required")
+        # Re-parse test cases from potentially edited markdown
+        markdown = body.get("content", {}).get("markdown", "")
+        if markdown:
+            tcs_reparsed = parse_test_cases(markdown)
+            # Preserve playwright_script and reviewed state from existing test cases
+            existing_map = {tc["id"]: tc for tc in body.get("content", {}).get("test_cases", [])}
+            for tc in tcs_reparsed:
+                if tc["id"] in existing_map:
+                    tc["playwright_script"] = existing_map[tc["id"]].get("playwright_script", "")
+                    tc["reviewed"] = existing_map[tc["id"]].get("reviewed", False)
+            body["content"]["test_cases"] = tcs_reparsed
+            body["test_case_count"] = len(tcs_reparsed)
+        save_test_plan(body)
+        return ok(body)
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/history/<string:plan_id>", methods=["PUT"])
+@require_auth("developer")
+def history_update(plan_id):
+    """Update an existing plan's markdown and re-parse test cases."""
+    try:
+        if not _valid_plan_id(plan_id):
+            return err("Invalid plan id")
+        from tools.storage_manager import save_test_plan
+        record = get_test_plan(plan_id)
+        if not record:
+            return err("Plan not found", 404)
+        body = request.get_json(force=True) or {}
+        markdown = body.get("markdown", "").strip()
+        if not markdown:
+            return err("markdown is required")
+        # Re-parse test cases, preserving scripts and reviewed state
+        tcs_reparsed = parse_test_cases(markdown)
+        existing_map = {tc["id"]: tc for tc in record.get("content", {}).get("test_cases", [])}
+        for tc in tcs_reparsed:
+            if tc["id"] in existing_map:
+                tc["playwright_script"] = existing_map[tc["id"]].get("playwright_script", "")
+                tc["reviewed"] = existing_map[tc["id"]].get("reviewed", False)
+        record["content"]["markdown"] = markdown
+        record["content"]["test_cases"] = tcs_reparsed
+        record["test_case_count"] = len(tcs_reparsed)
+        save_test_plan(record)
+        return ok(record)
+    except Exception as e:
+        return err(str(e), 500)
 
 
 # ── History ───────────────────────────────────────────────────────────────────

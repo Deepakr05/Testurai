@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useContext } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { ProviderContext } from '../context/ProviderContext'
 import { AuthContext } from '../context/AuthContext'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -39,6 +41,10 @@ export default function Generate() {
   const [loadStep,   setLoadStep]   = useState(0)
   const [genError,   setGenError]   = useState('')
   const [toast,      setToast]      = useState(null)
+  const [generatedPlan, setGeneratedPlan]   = useState(null)
+  const [reviewTab, setReviewTab]           = useState('preview')
+  const [editMarkdown, setEditMarkdown]     = useState('')
+  const [planSaving, setPlanSaving]         = useState(false)
   function showToast(msg, type = 'info') {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3000)
@@ -112,8 +118,11 @@ export default function Generate() {
         test_plan_format:       formats,
       }, { signal: ctrl.signal })
       clearInterval(loadInterval.current)
-      showToast('Success! Redirecting to test plan...', 'success')
-      setTimeout(() => navigate(`/plan/${r.data.data.id}`, { state: { plan: r.data.data } }), 1000)
+      setGenerating(false)
+      setGeneratedPlan(r.data.data)
+      setEditMarkdown(r.data.data.content?.markdown || '')
+      setReviewTab('preview')
+      showToast('Test plan generated — review before saving.', 'success')
     } catch(e) {
       clearInterval(loadInterval.current)
       if (axios.isCancel(e)) return
@@ -129,6 +138,28 @@ export default function Generate() {
     } else {
       handleGenerate()
     }
+  }
+
+  async function handleSavePlan() {
+    if (!generatedPlan) return
+    setPlanSaving(true)
+    try {
+      const planToSave = {
+        ...generatedPlan,
+        content: { ...generatedPlan.content, markdown: editMarkdown },
+      }
+      const r = await axios.post('/api/history', planToSave)
+      navigate(`/plan/${r.data.data.id}`, { state: { plan: r.data.data } })
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Save failed', 'error')
+      setPlanSaving(false)
+    }
+  }
+
+  function handleDiscardPlan() {
+    setGeneratedPlan(null)
+    setEditMarkdown('')
+    setReviewTab('preview')
   }
 
   // ── Loading Overlay ───────────────────────────────────────────────────────
@@ -200,6 +231,88 @@ export default function Generate() {
             </button>
           </div>
         </div>
+      </div>
+    )
+  }
+
+  // ── Review Screen (after generation, before saving) ────────────────────────
+  if (generatedPlan) {
+    const tcs = generatedPlan.content?.test_cases || []
+    return (
+      <div className="fade-in">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button className="btn btn-ghost" style={{ padding: '6px 10px' }} onClick={handleDiscardPlan}>←</button>
+            <div>
+              <h1 className="page-title" style={{ marginBottom: 2 }}>Review Test Plan</h1>
+              <p className="page-subtitle" style={{ margin: 0 }}>
+                Review and edit before saving to the database
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'right', marginRight: 8 }}>
+              <div><b style={{ color: 'var(--text)' }}>{generatedPlan.jira_id}</b> — {generatedPlan.jira_title}</div>
+              <div>{tcs.length} test cases · {generatedPlan.llm_model} · {generatedPlan.generation_time_seconds}s</div>
+            </div>
+            <button className="btn btn-ghost" onClick={handleDiscardPlan}>Discard</button>
+            <button className="btn btn-primary" onClick={handleSavePlan} disabled={planSaving}>
+              {planSaving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '💾'} Save to Database
+            </button>
+          </div>
+        </div>
+
+        {/* Sub-tabs */}
+        <div style={{
+          display: 'flex', gap: 4, marginBottom: 16,
+          background: 'var(--surface-2)', borderRadius: 'var(--radius)', padding: 4,
+          width: 'fit-content',
+        }}>
+          {[{ id: 'preview', label: '👁 Preview' }, { id: 'edit', label: '✏ Edit Markdown' }].map(t => (
+            <button key={t.id} onClick={() => setReviewTab(t.id)} style={{
+              padding: '6px 16px', borderRadius: 'var(--radius-sm)', fontSize: 13, border: 'none',
+              fontWeight: reviewTab === t.id ? 600 : 400, cursor: 'pointer',
+              background: reviewTab === t.id ? 'var(--surface)' : 'transparent',
+              color: reviewTab === t.id ? 'var(--cyan)' : 'var(--text-muted)',
+              boxShadow: reviewTab === t.id ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+              transition: 'all 0.15s',
+            }}>{t.label}</button>
+          ))}
+        </div>
+
+        {reviewTab === 'preview' && (
+          <div className="card markdown-body" style={{ background: 'var(--bg)', padding: '24px 32px' }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{editMarkdown}</ReactMarkdown>
+          </div>
+        )}
+
+        {reviewTab === 'edit' && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Edit Markdown</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {editMarkdown.split('\n').length} lines · {editMarkdown.length} characters
+              </div>
+            </div>
+            <textarea
+              value={editMarkdown}
+              onChange={e => setEditMarkdown(e.target.value)}
+              style={{
+                width: '100%', boxSizing: 'border-box', minHeight: '70vh',
+                background: 'var(--surface-2)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)', color: 'var(--text)',
+                fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7,
+                padding: '14px 16px', resize: 'vertical',
+              }}
+            />
+          </div>
+        )}
+
+        {toast && (
+          <div className={`toast toast-${toast.type}`}>
+            {toast.type === 'success' ? '✅' : '❌'} {toast.msg}
+          </div>
+        )}
       </div>
     )
   }

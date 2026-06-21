@@ -23,6 +23,8 @@ Your task is to generate a comprehensive test plan in STRICT structured Markdown
 2. Do NOT add, remove, or rename any section.
 3. Fill each section with detailed, professional QA content relevant to the Jira issue provided.
 4. If a toggle for negative cases is enabled, include at least one negative/edge test case per scenario.
+5. Do NOT invent or assume any names, team members, on-call (OC) contacts, point-of-contact (POC) persons, department names, or role holders. Use the placeholder "TBD" for any person or team that is not explicitly provided in the Jira issue.
+6. Do NOT add "OC", "On-Call", or any operational abbreviations unless explicitly stated in the Jira issue description.
 
 ## Required Markdown Structure:
 
@@ -246,7 +248,7 @@ def _extract_test_data(text: str) -> dict:
 
 # ─── Main Orchestrator ────────────────────────────────────────────────────────
 
-def generate_test_plan(request: dict) -> dict:
+def generate_test_plan(request: dict, save: bool = True) -> dict:
     """
     Full pipeline: fetch Jira → build prompt → call LLM → parse → save.
     Returns the saved test plan record.
@@ -317,7 +319,8 @@ def generate_test_plan(request: dict) -> dict:
         },
     }
 
-    # Step 7: Persist
-    save_test_plan(record)
+    # Step 7: Persist (skipped if save=False — caller handles persistence)
+    if save:
+        save_test_plan(record)
 
     return record
