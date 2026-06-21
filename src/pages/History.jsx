@@ -44,7 +44,7 @@ export default function History() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
-  useEffect(() => { document.title = 'History | TestMaster' }, [])
+  useEffect(() => { document.title = 'History | Testurai' }, [])
 
   useEffect(() => { fetchHistory() }, [filter])
 

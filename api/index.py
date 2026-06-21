@@ -15,7 +15,7 @@ app = Flask(__name__)
 _DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://test-master-ai.vercel.app",
+    "https://testurai.vercel.app",
 ]
 _env_origins = os.getenv("FRONTEND_ORIGIN", "").strip()
 _allowed_origins = (
@@ -914,5 +914,5 @@ def _within_days(iso_str: str, days: int) -> bool:
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("[TestMaster] API starting on http://localhost:5000")
+    print("[Testurai] API starting on http://localhost:5000")
     app.run(debug=True, port=5000, host="0.0.0.0")

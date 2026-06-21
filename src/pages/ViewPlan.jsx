@@ -31,9 +31,9 @@ export default function ViewPlan() {
 
   useEffect(() => {
     if (plan?.jira_id) {
-      document.title = `${plan.jira_id} — Test Plan | TestMaster`
+      document.title = `${plan.jira_id} — Test Plan | Testurai`
     } else {
-      document.title = 'Test Plan | TestMaster'
+      document.title = 'Test Plan | Testurai'
     }
   }, [plan?.jira_id])
 

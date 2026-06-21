@@ -9,4 +9,4 @@ Disallow: /test-generator
 Disallow: /settings
 Disallow: /users
 
-Sitemap: https://test-master-ai.vercel.app/sitemap.xml
+Sitemap: https://testurai.vercel.app/sitemap.xml

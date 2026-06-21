@@ -1,8 +1,8 @@
-# TestMaster
+# Testurai
 
 AI-powered test plan generator that turns Jira issues into structured test plans and Playwright scripts.
 
-**Live:** https://test-master-ai.vercel.app
+**Live:** https://testurai.vercel.app
 
 ---
 
@@ -106,15 +106,15 @@ Every route sets `document.title` via `useEffect`, so the browser tab and histor
 
 | Route | Title |
 |-------|-------|
-| `/login` | Login \| TestMaster |
-| `/dashboard` | Dashboard \| TestMaster |
-| `/generate` | Generate Test Plan \| TestMaster |
-| `/history` | History \| TestMaster |
-| `/plan/:id` | `{JIRA-ID}` — Test Plan \| TestMaster *(dynamic)* |
-| `/test-cases` | Test Cases \| TestMaster |
-| `/test-generator` | Test Scripts \| TestMaster |
-| `/settings` | Settings \| TestMaster |
-| `/users` | User Management \| TestMaster |
+| `/login` | Login \| Testurai |
+| `/dashboard` | Dashboard \| Testurai |
+| `/generate` | Generate Test Plan \| Testurai |
+| `/history` | History \| Testurai |
+| `/plan/:id` | `{JIRA-ID}` — Test Plan \| Testurai *(dynamic)* |
+| `/test-cases` | Test Cases \| Testurai |
+| `/test-generator` | Test Scripts \| Testurai |
+| `/settings` | Settings \| Testurai |
+| `/users` | User Management \| Testurai |
 
 ### Performance (Core Web Vitals)
 - **Route-level code splitting** — every page is a separate JS chunk loaded on demand via `React.lazy` + `Suspense`. The initial bundle only downloads what the current route needs.
@@ -141,8 +141,8 @@ Every route sets `document.title` via `useEffect`, so the browser tab and histor
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/Deepakr05/Test_master.git
-cd Test_master
+git clone https://github.com/Deepakr05/Testurai.git
+cd Testurai
 pip install -r requirements.txt
 ```
 

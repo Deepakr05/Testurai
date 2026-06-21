@@ -86,7 +86,7 @@ export default function Sidebar() {
       <div className="sidebar-brand">
         <div className="brand-icon">✨</div>
         <div>
-          <span className="brand-name">TestMaster</span>
+          <span className="brand-name">Testurai</span>
           <div className="brand-tagline">Test Orchestrator</div>
         </div>
       </div>
@@ -163,7 +163,7 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <div style={{ padding: '8px 16px' }}>
-          <div className="sidebar-version">TestMaster v1.0</div>
+          <div className="sidebar-version">Testurai v1.0</div>
         </div>
       </div>
     </div>

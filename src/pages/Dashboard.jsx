@@ -45,7 +45,7 @@ export default function Dashboard() {
   const [subTasks, setSubTasks]       = useState(true)
   const [aiSuggestions, setAiSuggestions] = useState(false)
 
-  useEffect(() => { document.title = 'Dashboard | TestMaster' }, [])
+  useEffect(() => { document.title = 'Dashboard | Testurai' }, [])
 
   useEffect(() => {
     axios.get('/api/stats')

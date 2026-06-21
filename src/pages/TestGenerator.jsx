@@ -56,7 +56,7 @@ export default function TestGenerator() {
       .catch(e => { setError('Failed to load test cases'); setLoading(false) })
   }
 
-  useEffect(() => { document.title = 'Test Scripts | TestMaster' }, [])
+  useEffect(() => { document.title = 'Test Scripts | Testurai' }, [])
 
   useEffect(() => {
     fetchCases()

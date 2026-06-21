@@ -1,6 +1,6 @@
 {
-  "name": "TestMaster — AI Test Plan Generator",
-  "short_name": "TestMaster",
+  "name": "Testurai — AI Test Plan Generator",
+  "short_name": "Testurai",
   "description": "Generate structured test plans from Jira issues using GPT-4o, Claude, or Gemini",
   "start_url": "/",
   "display": "standalone",

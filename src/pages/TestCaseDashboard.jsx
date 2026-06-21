@@ -74,7 +74,7 @@ export default function TestCaseDashboard() {
       .catch(e => { setError('Failed to load test cases'); setLoading(false) })
   }
 
-  useEffect(() => { document.title = 'Test Cases | TestMaster' }, [])
+  useEffect(() => { document.title = 'Test Cases | Testurai' }, [])
 
   useEffect(() => {
     fetchCases()
