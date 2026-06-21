@@ -24,6 +24,11 @@ _allowed_origins = (
 )
 CORS(app, resources={r"/api/*": {"origins": _allowed_origins}})
 
+DEFAULT_PLAYWRIGHT_PROMPT = (
+    "You are an expert QA engineer writing robust Playwright TypeScript tests. "
+    "ONLY return valid TypeScript code. Do not wrap code in markdown fences if possible."
+)
+
 # Path-parameter validators.
 _JIRA_ID_RE  = re.compile(r"^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$")
 _PLAN_ID_RE  = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -665,10 +670,8 @@ def generate_script(plan_id: str, tc_id: str):
         body = request.get_json(force=True) or {}
         provider = body.get("provider") or settings.get("llm", {}).get("active_provider", "openai")
 
-        system_prompt = (
-            "You are an expert QA engineer writing robust Playwright TypeScript tests. "
-            "ONLY return valid TypeScript code. Do not wrap code in markdown fences if possible."
-        )
+        playwright_cfg = settings.get("templates", {}).get("playwright_prompt", "").strip()
+        system_prompt = playwright_cfg or DEFAULT_PLAYWRIGHT_PROMPT
         prompt = (
             f"Generate a pure Playwright TypeScript test for the following test case:\n"
             f"Title: {tc.get('title')}\n"
@@ -845,6 +848,45 @@ def _merge_preserving_masked(current: dict, incoming: dict, path=""):
             pass
         else:
             current[key] = value
+
+
+@app.route("/api/settings/templates", methods=["GET"])
+@require_auth("normal")
+def templates_get():
+    try:
+        from tools.test_plan_generator import SYSTEM_PROMPT as DEFAULT_PLAN_PROMPT
+        settings = load_settings()
+        stored = settings.get("templates", {})
+        custom_plan = stored.get("test_plan_prompt", "").strip()
+        custom_pw   = stored.get("playwright_prompt", "").strip()
+        return ok({
+            "test_plan_prompt": custom_plan or DEFAULT_PLAN_PROMPT,
+            "playwright_prompt": custom_pw or DEFAULT_PLAYWRIGHT_PROMPT,
+            "is_custom": {
+                "test_plan_prompt": bool(custom_plan),
+                "playwright_prompt": bool(custom_pw),
+            },
+            "defaults": {
+                "test_plan_prompt": DEFAULT_PLAN_PROMPT,
+                "playwright_prompt": DEFAULT_PLAYWRIGHT_PROMPT,
+            },
+        })
+    except Exception as e:
+        return err(str(e), 500)
+
+
+@app.route("/api/settings/templates", methods=["PUT"])
+@require_auth("admin")
+def templates_put():
+    try:
+        body = request.get_json(force=True) or {}
+        save_settings({"templates": {
+            "test_plan_prompt": body.get("test_plan_prompt", "").strip(),
+            "playwright_prompt": body.get("playwright_prompt", "").strip(),
+        }})
+        return ok({"saved": True})
+    except Exception as e:
+        return err(str(e), 500)
 
 
 @app.route("/api/settings/test-connection", methods=["POST"])

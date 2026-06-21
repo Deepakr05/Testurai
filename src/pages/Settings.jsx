@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import axios from 'axios'
+import { AuthContext } from '../context/AuthContext'
 
 const PROVIDER_META = {
   openai:    { name: 'OpenAI',    model: 'GPT-4o',           color: '#10A37F', icon: 'O|' },
@@ -10,6 +11,9 @@ const PROVIDER_META = {
 }
 
 export default function Settings() {
+  const { user } = useContext(AuthContext)
+  const isAdmin = user?.role === 'admin'
+
   const [settings, setSettings] = useState(null)
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
@@ -19,6 +23,12 @@ export default function Settings() {
   const [testResults, setTestResults] = useState({})
   const [toast, setToast]       = useState(null)
   const [persistence, setPersistence] = useState(null)
+
+  const [templates, setTemplates]           = useState({ test_plan_prompt: '', playwright_prompt: '' })
+  const [defaults, setDefaults]             = useState({ test_plan_prompt: '', playwright_prompt: '' })
+  const [isCustom, setIsCustom]             = useState({ test_plan_prompt: false, playwright_prompt: false })
+  const [templatesSaving, setTemplatesSaving] = useState(false)
+  const [templatesLoading, setTemplatesLoading] = useState(false)
 
   useEffect(() => { document.title = 'Settings | Testurai' }, [])
 
@@ -34,6 +44,19 @@ export default function Settings() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    setTemplatesLoading(true)
+    axios.get('/api/settings/templates')
+      .then(r => {
+        const d = r.data.data
+        setTemplates({ test_plan_prompt: d.test_plan_prompt, playwright_prompt: d.playwright_prompt })
+        setDefaults({ test_plan_prompt: d.defaults.test_plan_prompt, playwright_prompt: d.defaults.playwright_prompt })
+        setIsCustom(d.is_custom)
+      })
+      .catch(() => {})
+      .finally(() => setTemplatesLoading(false))
   }, [])
 
   function showToast(msg, type = 'info') {
@@ -82,6 +105,25 @@ export default function Settings() {
     } finally { setTesting(p => ({ ...p, [key]: false })) }
   }
 
+  async function handleSaveTemplates() {
+    setTemplatesSaving(true)
+    try {
+      await axios.put('/api/settings/templates', templates)
+      const r = await axios.get('/api/settings/templates')
+      const d = r.data.data
+      setTemplates({ test_plan_prompt: d.test_plan_prompt, playwright_prompt: d.playwright_prompt })
+      setIsCustom(d.is_custom)
+      showToast('Templates saved!', 'success')
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Save failed', 'error')
+    } finally { setTemplatesSaving(false) }
+  }
+
+  function handleResetTemplate(key) {
+    setTemplates(prev => ({ ...prev, [key]: defaults[key] }))
+    setIsCustom(prev => ({ ...prev, [key]: false }))
+  }
+
   if (loading) return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
       <div className="spinner" style={{ width: 40, height: 40 }} />
@@ -91,9 +133,10 @@ export default function Settings() {
   const providers = settings?.llm?.providers || {}
 
   const TABS = [
-    { id: 'llm',     label: 'LLM Models',      icon: '🤖' },
-    { id: 'jira',    label: 'Jira Integration', icon: '🔗' },
-    { id: 'output',  label: 'Output Formats',   icon: '📄' },
+    { id: 'llm',       label: 'LLM Models',      icon: '🤖' },
+    { id: 'jira',      label: 'Jira Integration', icon: '🔗' },
+    { id: 'output',    label: 'Output Formats',   icon: '📄' },
+    { id: 'templates', label: 'Templates',        icon: '📝' },
   ]
 
   return (
@@ -340,6 +383,115 @@ export default function Settings() {
                   <span className="badge badge-green">Enabled</span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Templates Tab */}
+          {tab === 'templates' && (
+            <div className="slide-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>Prompt Templates</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Customize the system prompts used for test plan and script generation.
+                  </div>
+                </div>
+                {isAdmin ? (
+                  <button className="btn btn-primary" onClick={handleSaveTemplates} disabled={templatesSaving}>
+                    {templatesSaving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '💾'} Save Templates
+                  </button>
+                ) : (
+                  <span className="badge badge-gray">Admin only</span>
+                )}
+              </div>
+
+              {templatesLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                  <div className="spinner" style={{ width: 28, height: 28 }} />
+                </div>
+              ) : (
+                <>
+                  {/* Test Plan Template */}
+                  <div className="card" style={{ marginBottom: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>Test Plan System Prompt</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                          Sent to the LLM when generating a test plan. Defines the 13-section structure the AI must follow.
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
+                        <span className={`badge ${isCustom.test_plan_prompt ? 'badge-cyan' : 'badge-gray'}`}>
+                          {isCustom.test_plan_prompt ? 'Custom' : 'Default'}
+                        </span>
+                        {isCustom.test_plan_prompt && isAdmin && (
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                            onClick={() => handleResetTemplate('test_plan_prompt')}>
+                            Reset to Default
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <textarea
+                      value={templates.test_plan_prompt}
+                      onChange={e => {
+                        setTemplates(prev => ({ ...prev, test_plan_prompt: e.target.value }))
+                        setIsCustom(prev => ({ ...prev, test_plan_prompt: e.target.value !== defaults.test_plan_prompt }))
+                      }}
+                      readOnly={!isAdmin}
+                      rows={24}
+                      style={{
+                        width: '100%', boxSizing: 'border-box',
+                        background: 'var(--surface-2)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)', color: 'var(--text)',
+                        fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6,
+                        padding: '12px 14px', resize: 'vertical',
+                        opacity: isAdmin ? 1 : 0.7,
+                      }}
+                    />
+                  </div>
+
+                  {/* Playwright Template */}
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>Playwright Script System Prompt</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                          Used when generating Playwright TypeScript scripts from individual test cases.
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 16 }}>
+                        <span className={`badge ${isCustom.playwright_prompt ? 'badge-cyan' : 'badge-gray'}`}>
+                          {isCustom.playwright_prompt ? 'Custom' : 'Default'}
+                        </span>
+                        {isCustom.playwright_prompt && isAdmin && (
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                            onClick={() => handleResetTemplate('playwright_prompt')}>
+                            Reset to Default
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <textarea
+                      value={templates.playwright_prompt}
+                      onChange={e => {
+                        setTemplates(prev => ({ ...prev, playwright_prompt: e.target.value }))
+                        setIsCustom(prev => ({ ...prev, playwright_prompt: e.target.value !== defaults.playwright_prompt }))
+                      }}
+                      readOnly={!isAdmin}
+                      rows={6}
+                      style={{
+                        width: '100%', boxSizing: 'border-box',
+                        background: 'var(--surface-2)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)', color: 'var(--text)',
+                        fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6,
+                        padding: '12px 14px', resize: 'vertical',
+                        opacity: isAdmin ? 1 : 0.7,
+                      }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -268,9 +268,10 @@ def generate_test_plan(request: dict) -> dict:
 
     for attempt in range(2):
         try:
+            system_prompt_override = settings.get("templates", {}).get("test_plan_prompt", "").strip()
             markdown_content = generate(
                 prompt=prompt,
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=system_prompt_override or SYSTEM_PROMPT,
                 provider=provider,
                 settings=settings,
             )
