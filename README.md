@@ -9,11 +9,14 @@ AI-powered test plan generator that turns Jira issues into structured test plans
 ## Features
 
 - **Test Plan Generation** — Fetch any Jira issue and generate unit, integration, e2e, and security test cases using an LLM of your choice
+- **Review Before Save** — Generated plans land on a review screen (rendered preview + raw markdown editor) before being persisted to the database
+- **Plan Editing** — Developer and admin users can edit any saved plan's markdown inline from the View Plan page; test cases are re-parsed automatically on save
 - **Test Script Generation** — Convert individual test cases into ready-to-run Playwright TypeScript scripts
 - **Test Case Dashboard** — View, edit, create, and delete test cases across all plans
 - **History** — Browse, search, filter, and star past test plans
 - **Export** — Download plans as DOCX or PDF; export all scripts as a ZIP
 - **Multi-LLM** — Supports OpenAI, Anthropic, Google Gemini, Groq, and local LLMs (Ollama)
+- **Configurable Templates** — Admins can customise the test plan system prompt and Playwright base framework via the Settings → Templates tab
 - **User Auth & RBAC** — Supabase-backed login with three role levels
 - **Durable Storage** — Supabase PostgreSQL in production; local JSON fallback for dev
 
@@ -24,10 +27,10 @@ AI-powered test plan generator that turns Jira issues into structured test plans
 | Role | Access |
 |------|--------|
 | `normal` | Read-only — view plans, history, test cases, export |
-| `developer` | Read/write — generate plans & scripts, edit test cases, manage settings |
-| `admin` | Full access — everything above + delete plans, manage users |
+| `developer` | Read/write — generate plans & scripts, review/edit plans, edit test cases, manage settings |
+| `admin` | Full access — everything above + delete plans, manage users, configure templates |
 
-Admins are the only ones who can create or delete user accounts. There is no public sign-up.
+Admins are the only ones who can create or delete user accounts and update prompt templates. There is no public sign-up.
 
 ---
 
@@ -280,11 +283,17 @@ The project is pre-configured for Vercel via `vercel.json`. Push to `main` to au
 |--------|----------|------|-------------|
 | GET | `/api/stats` | normal | Dashboard stats |
 | GET | `/api/jira/issue/:id` | normal | Fetch Jira issue |
-| POST | `/api/generate` | developer | Generate test plan |
+| POST | `/api/generate` | developer | Generate test plan (not auto-saved) |
 | GET | `/api/history` | normal | List plans |
+| POST | `/api/history` | developer | Save a reviewed/edited plan to DB |
 | GET | `/api/history/:id` | normal | Plan detail |
+| PUT | `/api/history/:id` | developer | Update plan markdown, re-parse test cases |
 | DELETE | `/api/history/:id` | admin | Delete plan |
+| PATCH | `/api/history/:id/star` | developer | Toggle star |
 | GET | `/api/test-cases` | normal | All test cases |
+| POST | `/api/test-cases/:planId` | developer | Create test case |
+| PUT | `/api/test-cases/:planId/:tcId` | developer | Update test case |
+| DELETE | `/api/test-cases/:planId/:tcId` | developer | Delete test case |
 | POST | `/api/generate-script/:planId/:tcId` | developer | Generate Playwright script |
 | GET | `/api/export/:id/:fmt` | normal | Export as docx/pdf |
 | POST | `/api/export-scripts` | developer | Export scripts as ZIP |
@@ -293,7 +302,9 @@ The project is pre-configured for Vercel via `vercel.json`. Push to `main` to au
 | Method | Endpoint | Role | Description |
 |--------|----------|------|-------------|
 | GET | `/api/settings` | normal | Masked settings |
-| PUT | `/api/settings` | admin | Save settings |
+| PUT | `/api/settings` | developer | Save settings |
 | GET | `/api/settings/providers` | normal | LLM provider list |
 | PATCH | `/api/settings/active-provider` | developer | Switch active LLM |
 | POST | `/api/settings/test-connection` | developer | Test LLM/Jira connection |
+| GET | `/api/settings/templates` | normal | Get test plan & Playwright prompt templates |
+| PUT | `/api/settings/templates` | admin | Save custom templates |
